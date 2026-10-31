@@ -99,7 +99,7 @@ export const WEAPONS = [
   {
     id: 'seil', name: 'Spanngurt-Seil', icon: '🧗', kind: 'rope', util: true, cat: 9,
     ammo: -1,
-    desc: 'Ninja-Seil: Leertaste schießt den Haken, ←/→ schwingen, ↑/↓ ein-/ausfahren, Leertaste lässt los. In der Luft neu schießen (5×).',
+    desc: 'Ninja-Seil wie in Worms: ↑/↓ zielen, Leertaste schießt den Haken. Am Gurt ←/→ schwingen, ↑/↓ einholen (macht schneller) / ausfahren. Leertaste lässt los, Schwung bleibt; in der Luft neu schießen (5× einhaken). Vom Seil Granaten, Gas & Stapler abwerfen.',
   },
   {
     id: 'rucksack', name: 'Druckluft-Rucksack', icon: '🎒', kind: 'jet', util: true, cat: 9,

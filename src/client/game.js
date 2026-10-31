@@ -10,19 +10,18 @@ import { findSpawns, isFree } from '../shared/terrain-gen.js';
 import { Terrain } from './terrain.js';
 import { fallDamage } from '../shared/fall.js';
 import { sfx, setLoop } from './audio.js';
+import { ROPE, newRope, fireHook as shootHook, hookStep, ropeStep } from '../shared/rope.js';
 
 const STEP = 1 / 60;
 const RESOLVE_MAX = 10; // Sekunden: länger wartet ein Zug nie auf Ruhe
 const WIND_ACC = 160;
 const SNAP_INTERVAL = 50;
-// Spanngurt-Seil
-const ROPE_MAX = 420;
-const ROPE_MIN = 12;
-const ROPE_SHOTS = 5;
-const ROPE_SPEED = 1500;
 // Gummi-Expander
 const BUNGEE_REST = 70;
 const BUNGEE_K = 16;
+
+// Was sich vom Seil aus einsetzen lässt (Abwurf- und Zielwaffen, wie in Worms)
+const ROPE_WEAPON_KINDS = ['grenade', 'drop', 'walker', 'airstrike', 'heavy', 'skip'];
 
 const r1 = (v) => Math.round(v * 10) / 10;
 
@@ -377,6 +376,8 @@ export class Game {
       // Aktives Hilfsmittel bedienen (loslassen, abschalten, neu schießen)
       if (this.mv && (wpn.kind === this.mv.kind || this.tp !== 'aim')) { this.utilityAction(w); return; }
       if (this.tp !== 'aim' || (wpn.target && !wpn.charge)) return;
+      // Vom Seil wird nur abgeworfen (wie in Worms): kein Aufladen
+      if (this.onRope() && !wpn.util) { this.fire(0); return; }
       if (wpn.kind === 'homing' && !this.homeTarget) { this.ui.toast('Erst den Empfänger anklicken!', '#00e5ff'); return; }
       if (wpn.charge) { if (!this.charging) { this.charging = true; this.charge = 0; } }
       else this.fire(1);
@@ -586,7 +587,7 @@ export class Game {
     }
     // Am Seil steuern ↑/↓ die Seillänge, sonst den Zielwinkel
     if (mv?.kind === 'rope' && mv.pts) {
-      if (up !== down) mv.len = Math.max(ROPE_MIN, Math.min(ROPE_MAX, mv.len + (up ? -1 : 1) * dt * 190));
+      // Länge wird in ropePhysics gesteuert
     } else if (mv?.kind === 'jet') {
       // ↑ ist Schub
     } else if (up !== down && this.tp === 'aim') {
@@ -684,7 +685,7 @@ export class Game {
   startUtility(w, wpn) {
     switch (wpn.kind) {
       case 'rope':
-        this.mv = { kind: 'rope', pts: null, len: 0, hook: null, shots: 0 };
+        this.mv = newRope();
         return this.fireHook(w);
       case 'jet':
         this.mv = { kind: 'jet', fuel: wpn.fuel, th: false };
@@ -713,7 +714,7 @@ export class Game {
       if (mv.pts) { mv.pts = null; this.fx({ k: 'sfx', s: 'release' }); return; }
       if (mv.hook) return;
       if (this.tp !== 'aim') return;
-      if (mv.shots >= ROPE_SHOTS) { this.ui.toast('Gurt ist ausgeleiert – erst landen.', '#ff8f00'); return; }
+      if (mv.shots >= ROPE.SHOTS) { this.ui.toast('Gurt ist ausgeleiert – erst landen.', '#ff8f00'); return; }
       this.fireHook(w);
     } else if (mv.kind === 'chute') {
       if (mv.open) this.endUtility();
@@ -721,6 +722,11 @@ export class Game {
     } else {
       this.endUtility();
     }
+  }
+
+  // Hängt der Arbeiter gerade am Seil?
+  onRope() {
+    return this.mv?.kind === 'rope' && !!this.mv.pts;
   }
 
   endUtility() {
@@ -739,78 +745,47 @@ export class Game {
   fireHook(w) {
     const mv = this.mv;
     const dx = Math.cos(w.aim) * w.facing, dy = Math.sin(w.aim);
-    mv.hook = { x: w.x + dx * WORKER_R, y: w.y + dy * WORKER_R, dx, dy, dist: 0 };
-    mv.shots++;
+    shootHook(mv, w.x + dx * WORKER_R, w.y + dy * WORKER_R, dx, dy);
     this.fx({ k: 'sfx', s: 'rope' });
     this.fx({ k: 'anim', id: w.id, a: 'shoot' });
     return true;
   }
 
-  // Haken fliegt bis zur ersten Wand (oder bis das Seil zu Ende ist)
-  hookStep(w, dt) {
-    const h = this.mv.hook;
-    const steps = Math.ceil((ROPE_SPEED * dt) / 2);
-    for (let i = 0; i < steps; i++) {
-      h.x += h.dx * 2; h.y += h.dy * 2; h.dist += 2;
-      if (this.terrain.solid(h.x, h.y)) {
-        // Ein Stück zurück, damit der Ankerpunkt frei liegt
-        let ax = h.x, ay = h.y;
-        for (let j = 0; j < 4 && this.terrain.solid(ax, ay); j++) { ax -= h.dx; ay -= h.dy; }
-        const len = Math.hypot(w.x - ax, w.y - ay);
-        this.mv.pts = [{ x: ax, y: ay, side: 0 }];
-        this.mv.len = Math.max(ROPE_MIN, Math.min(ROPE_MAX, len));
-        this.mv.hook = null;
-        w.grounded = false;
-        this.fx({ k: 'sfx', s: 'clank' });
-        return;
-      }
-      if (h.dist > ROPE_MAX || h.x < -20 || h.x > W + 20 || h.y < -200 || h.y > this.waterY) {
-        this.mv.hook = null;
-        this.fx({ k: 'sfx', s: 'release' });
-        return;
-      }
-    }
-  }
-
-  // Erster Geländepunkt auf der Strecke a -> b (ohne die Endpunkte)
-  segmentHit(ax, ay, bx, by) {
-    const d = Math.hypot(bx - ax, by - ay);
-    if (d < 8) return null;
-    const ux = (bx - ax) / d, uy = (by - ay) / d;
-    for (let t = 4; t < d - 4; t += 2) {
-      const x = ax + ux * t, y = ay + uy * t;
-      if (this.terrain.solid(x, y)) return { x, y, t, ux, uy };
-    }
-    return null;
-  }
-
-  ropeWrap(w) {
+  // Am Seil: Pendel mit fester Maximallänge, wickelt sich um Kanten, reißt ohne Halt.
+  ropePhysics(w, dt, dir, input) {
     const mv = this.mv;
-    const P = mv.pts[mv.pts.length - 1];
-    // Abwickeln: Seil liegt nicht mehr an der Kante an
-    if (mv.pts.length > 1) {
-      const A = mv.pts[mv.pts.length - 2];
-      const c = (P.x - A.x) * (w.y - P.y) - (P.y - A.y) * (w.x - P.x);
-      if (c * P.side < 0) {
-        mv.pts.pop();
-        mv.len = Math.min(ROPE_MAX, mv.len + Math.hypot(P.x - A.x, P.y - A.y));
-        return;
-      }
+    if (this.terrain.hitsCircle(w.x, w.y, WORKER_R)) {
+      for (let i = 0; i < 40 && this.terrain.hitsCircle(w.x, w.y, WORKER_R); i++) w.y -= 1;
     }
-    // Aufwickeln: Gelände zwischen Arbeiter und Ankerpunkt -> neuer Knickpunkt
-    if (mv.pts.length >= 12) return;
-    const hit = this.segmentHit(P.x, P.y, w.x, w.y);
-    if (!hit) return;
-    // Knickpunkt kurz vor dem Hindernis, leicht aus dem Gelände heraus
-    let kx = hit.x - hit.ux * 2, ky = hit.y - hit.uy * 2;
-    const n = this.terrain.normalAt(hit.x, hit.y, 2);
-    for (let i = 0; i < 6 && this.terrain.solid(kx, ky); i++) { kx += n.x; ky += n.y; }
-    if (this.terrain.solid(kx, ky)) return;
-    const seg = Math.hypot(kx - P.x, ky - P.y);
-    if (seg < 3 || seg >= mv.len) return;
-    const c = (kx - P.x) * (w.y - ky) - (ky - P.y) * (w.x - kx);
-    mv.pts.push({ x: kx, y: ky, side: c >= 0 ? 1 : -1 });
-    mv.len -= seg;
+    const k = this.ai ? this.ai.keys : this.keys;
+    const up = k.has('ArrowUp') || k.has('KeyW');
+    const down = k.has('ArrowDown') || k.has('KeyS');
+    const reel = input && up !== down ? (up ? -1 : 1) : 0;
+    w.grounded = false;
+    const res = ropeStep(mv, w, dt, { dir, reel }, this.terrain, GRAVITY, WORKER_R);
+    if (res.broke) {
+      this.fx({ k: 'sfx', s: 'release' });
+      this.ui.toast('Der Haken hat keinen Halt mehr!', '#ff8f00');
+    }
+    this.ropeKnock(w);
+    w.still = 0;
+    if (w.y > this.waterY + 4) this.drown(w);
+  }
+
+  // Wie in Worms: Wer am Seil in Kollegen kracht, schubst sie weg (ohne Schaden).
+  ropeKnock(w) {
+    const sp = Math.hypot(w.vx, w.vy);
+    for (const o of this.workers) {
+      if (o === w || o.dead) continue;
+      const d = Math.hypot(o.x - w.x, o.y - w.y);
+      if (d > WORKER_R * 2 + 2) { o.knocked = false; continue; }
+      if (o.knocked || sp < 160) continue;
+      o.knocked = true;
+      o.vx += w.vx * 0.7; o.vy += w.vy * 0.7 - 120; o.grounded = false;
+      w.vx *= 0.5; w.vy *= 0.5;
+      this.fx({ k: 'sfx', s: 'bonk' });
+      this.fx({ k: 'puff', x: r1((o.x + w.x) / 2), y: r1((o.y + w.y) / 2), c: '#ffcc80' });
+    }
   }
 
   utilityPhysics(w, dt) {
@@ -823,34 +798,16 @@ export class Game {
     const dir = input && left !== right ? (left ? -1 : 1) : 0;
     switch (mv.kind) {
       case 'rope': {
-        if (mv.hook) this.hookStep(w, dt);
-        if (!mv.pts) {
-          this.physicsWorker(w, dt);
-          if (w.grounded && !mv.hook) this.mv = null; // gelandet: Seil wieder eingerollt
-          return;
+        if (mv.hook) {
+          const r = hookStep(mv, w, dt, this.terrain, { w: W, waterY: this.waterY });
+          if (r === 'attach') { w.grounded = false; this.fx({ k: 'sfx', s: 'clank' }); }
+          else if (r === 'miss') this.fx({ k: 'sfx', s: 'release' });
         }
-        this.physicsWorker(w, dt, {
-          safe: true, float: true, bounce: 0.25,
-          force: (o, h) => {
-            // Schwingen: seitlicher Schub
-            if (dir) o.vx += dir * 420 * h;
-            const sp = Math.hypot(o.vx, o.vy);
-            if (sp > 950) { o.vx *= 950 / sp; o.vy *= 950 / sp; }
-          },
-          post: (o) => {
-            this.ropeWrap(o);
-            const P = mv.pts[mv.pts.length - 1];
-            const dx = o.x - P.x, dy = o.y - P.y, d = Math.hypot(dx, dy);
-            if (d > mv.len && d > 0.01) {
-              const ux = dx / d, uy = dy / d;
-              const nx = P.x + ux * mv.len, ny = P.y + uy * mv.len;
-              if (!this.terrain.hitsCircle(nx, ny, WORKER_R)) { o.x = nx; o.y = ny; }
-              const vr = o.vx * ux + o.vy * uy;
-              if (vr > 0) { o.vx -= vr * ux; o.vy -= vr * uy; }
-            }
-          },
-        });
-        break;
+        if (mv.pts) { this.ropePhysics(w, dt, dir, input); return; }
+        // Losgelassen: Schwung bleibt, normaler Fallschaden über der Sicherheitshöhe
+        this.physicsWorker(w, dt);
+        if (w.grounded && !mv.hook) this.mv = null; // gelandet: Gurt wieder eingerollt
+        return;
       }
       case 'jet': {
         const thrust = input && up && mv.fuel > 0;
@@ -985,6 +942,13 @@ export class Game {
     let control = false;
     this.manualCam = false;
 
+    // Am Seil (oder Haken in der Luft): nur Abwurf- und Zielwaffen, wie in Worms
+    if (this.onRope() && !wpn.util && !ROPE_WEAPON_KINDS.includes(wpn.kind)) {
+      this.ui.toast('Vom Seil aus geht nur Abwerfen (Granaten, Gas, Stapler) oder Zielwaffen.', '#ff8f00');
+      return;
+    }
+    const roped = this.onRope();
+
     // Hilfsmittel: Zug läuft weiter
     if (wpn.util) {
       if (this.mv) return;
@@ -1002,6 +966,13 @@ export class Game {
         break;
       }
       case 'grenade': {
+        if (roped) {
+          // Abwurf vom Seil: fällt mit dem Schwung des Arbeiters
+          this.projectiles.push({ type: wpn.id, wpn, x: w.x, y: w.y + WORKER_R + 5, vx: w.vx * 0.9, vy: w.vy * 0.9, r: 4, rot: 0, facing: w.facing, fuse: wpn.fuse, age: 0 });
+          this.fx({ k: 'sfx', s: 'thud' });
+          this.fx({ k: 'anim', id: w.id, a: 'drop' });
+          break;
+        }
         const sp = 100 + power * 650;
         this.projectiles.push({ type: wpn.id, wpn, x: sx, y: sy, vx: dir.x * sp, vy: dir.y * sp, r: 4, rot: 0, facing: w.facing, fuse: wpn.fuse, age: 0 });
         this.fx({ k: 'sfx', s: 'throw' });
@@ -1093,7 +1064,7 @@ export class Game {
         break;
       }
       case 'walker': {
-        const p = { type: 'stapler', wpn, x: w.x + w.facing * 16, y: w.y - 4, vx: w.facing * 60, vy: -80, r: 7, rot: 0, facing: w.facing, fuse: wpn.fuse, age: 0, grounded: false, stuck: 0 };
+        const p = { type: 'stapler', wpn, x: w.x + w.facing * (roped ? 4 : 16), y: w.y + (roped ? WORKER_R + 8 : -4), vx: w.facing * 60, vy: -80, r: 7, rot: 0, facing: w.facing, fuse: wpn.fuse, age: 0, grounded: false, stuck: 0 };
         this.projectiles.push(p);
         this.walker = p;
         this.fx({ k: 'sfx', s: 'engine' });
@@ -1101,7 +1072,7 @@ export class Game {
         break;
       }
       case 'drop': {
-        this.projectiles.push({ type: 'gas', wpn, x: w.x + w.facing * 12, y: w.y - 4, vx: w.facing * 40, vy: -60, r: 5, rot: 0, facing: 1, fuse: wpn.fuse, age: 0 });
+        this.projectiles.push({ type: 'gas', wpn, x: w.x + (roped ? 0 : w.facing * 12), y: w.y + (roped ? WORKER_R + 6 : -4), vx: roped ? w.vx * 0.9 : w.facing * 40, vy: roped ? w.vy * 0.9 : -60, r: 5, rot: 0, facing: 1, fuse: wpn.fuse, age: 0 });
         this.fx({ k: 'sfx', s: 'thud' });
         this.fx({ k: 'anim', id: w.id, a: 'drop' });
         break;
