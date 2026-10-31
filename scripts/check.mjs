@@ -3,10 +3,10 @@ import { generateTerrain, findSpawns, isFree } from '../src/shared/terrain-gen.j
 import { WEAPONS, WEAPON_CATS, PROJECTILE_TYPES } from '../src/shared/weapons.js';
 import { WORKER_R, WATER_Y, GRAVITY } from '../src/shared/constants.js';
 import { fallDamage } from '../src/shared/fall.js';
-import { sanitizeRules, defaultRules, ammoFromRules, configurableWeapons, AMMO_PRESETS } from '../src/shared/rules.js';
+import { sanitizeRules, defaultRules, ammoFromRules, configurableWeapons, AMMO_PRESETS, GAME_MODES, modeRules } from '../src/shared/rules.js';
 import { MAPS, MAP_CHOICES, COMPLEXITY, resolveMap, isRopeMap } from '../src/shared/maps.js';
-import { ROPE } from '../src/shared/rope.js';
-import { planTurn, planMove, teleportSpot, maskTerrain, LEVELS } from '../src/client/ai.js';
+import { ROPE, knockHit } from '../src/shared/rope.js';
+import { planTurn, planMove, planRope, teleportSpot, maskTerrain, LEVELS } from '../src/client/ai.js';
 
 let fails = 0;
 const ok = (cond, msg) => { if (!cond) { fails++; console.error('✗', msg); } else console.log('✓', msg); };
@@ -165,6 +165,74 @@ for (const lvl of [1, 3]) {
   const rb = sanitizeRules({ map: 'gibtsnicht', complexity: 9 });
   ok(rr.map === 'kranbahn' && rr.complexity === 3 && rb.map === defaultRules().map && rb.complexity === defaultRules().complexity, 'Regeln: Kartenwahl wird geprüft');
   ok(MAP_CHOICES.every((x) => x.name && x.icon && x.desc), 'Alle Karten haben Name, Symbol und Beschreibung');
+}
+
+// Spielmodus „Rope only“
+{
+  const run = (it) => { let r; do { r = it.next(); } while (!r.done); return r.value; };
+  const sr = sanitizeRules(modeRules('seil', defaultRules()));
+  const am = ammoFromRules(sr);
+  const avail = configurableWeapons().filter((w) => am[w.id] !== 0).map((w) => w.id).sort();
+  ok(sr.mode === 'seil' && avail.join() === 'hubwagen,seil' && am.seil === -1 && am.hubwagen === -1 && am.pause === -1, `Rope only: nur Seil (∞) und Hubwagen im Lager (${avail.join(', ')})`);
+  ok(isRopeMap(sr.map) || sr.map === 'zufall-seil', `Rope only: Seil-Karte gewählt (${sr.map})`);
+  ok(sr.turnTime === 20 && sr.fallDamage === 0, 'Rope only: kurze Züge, kein Fallschaden');
+  ok(sanitizeRules(modeRules('seil', { ...defaultRules(), map: 'kranbahn' })).map === 'kranbahn', 'Rope only: gewählte Seil-Karte bleibt');
+  const back = sanitizeRules(modeRules('standard', sr));
+  ok(back.mode === 'standard' && Object.keys(back.ammo).length === 0 && !isRopeMap(back.map) && back.turnTime === defaultRules().turnTime, 'Zurück auf Standard: alles wieder normal');
+  ok(sanitizeRules({ mode: 'quatsch' }).mode === 'standard' && Object.keys(GAME_MODES).every((k) => GAME_MODES[k].label && GAME_MODES[k].desc), 'Spielmodus wird geprüft');
+
+  // Schubsen: nur bei Tempo und Kontakt
+  ok(!knockHit({ x: 0, y: 0, vx: 50, vy: 0 }, { x: 10, y: 0 }, WORKER_R) && !!knockHit({ x: 0, y: 0, vx: 400, vy: 0 }, { x: 10, y: 0 }, WORKER_R)
+    && !knockHit({ x: 0, y: 0, vx: 400, vy: 0 }, { x: 100, y: 0 }, WORKER_R), 'Seil-Schubser nur im schnellen Flug bei Kontakt');
+
+  // KI im Seil-Match: schwingt los und landet sicher, oft beim Gegner
+  for (const lvl of [1, 3]) {
+    let tries = 0, plans = 0, safe = 0, ms = 0;
+    for (const mapId of ['kranbahn', 'haengeregal']) {
+      for (const seed of [5, 99, 31337]) {
+        const mat = generateTerrain(seed, mapId, 1);
+        const terrain = maskTerrain(mat);
+        const sp = findSpawns(mat, seed, 6);
+        for (let i = 0; i + 1 < sp.length; i += 2) {
+          const self = { id: 0, team: 0, x: sp[i][0], y: sp[i][1], hp: 100, dead: false };
+          const foe = { id: 1, team: 1, x: sp[i + 1][0], y: sp[i + 1][1], hp: 100, dead: false };
+          const ctx = { terrain, workers: [self, foe], self, wind: 0, waterY: WATER_Y, fallDamage: 0 };
+          const t0 = Date.now();
+          const p = run(planRope(ctx, { ...LEVELS[lvl], weapons: ['hubwagen'] }, () => -1));
+          ms += Date.now() - t0;
+          tries++;
+          if (p) { plans++; if (p.score > -20) safe++; }
+        }
+      }
+    }
+    ok(plans >= tries * 0.8 && safe >= tries * 0.6, `KI Stufe ${lvl}: plant Seilschwünge auf Seil-Karten (${plans}/${tries}, ${safe} sicher, ${(ms / tries).toFixed(0)} ms je Planung)`);
+  }
+  // Gegner steht am Beckenrand: KI rempelt ihn mit dem Seil ins Wasser
+  {
+    const Wd = 2400, Hd = 1200;
+    const mat = new Uint8Array(Wd * Hd);
+    const fill = (x0, y0, x1, y1) => { for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) mat[y * Wd + x] = 1; };
+    fill(1000, WATER_Y - 560, 1500, WATER_Y - 530); // Kranschiene zum Einhaken
+    fill(900, WATER_Y - 200, 1000, WATER_Y + 40); // eigener Pfeiler
+    fill(1260, WATER_Y - 220, 1300, WATER_Y + 40); // schmaler Pfeiler des Gegners
+    const terrain = maskTerrain(mat);
+    const self = { id: 0, team: 0, x: 950, y: WATER_Y - 200 - WORKER_R - 1, hp: 100, dead: false };
+    const foe = { id: 1, team: 1, x: 1280, y: WATER_Y - 220 - WORKER_R - 1, hp: 100, dead: false };
+    const ctx = { terrain, workers: [self, foe], self, wind: 0, waterY: WATER_Y, fallDamage: 0 };
+    const p = run(planRope(ctx, { ...LEVELS[3], weapons: ['hubwagen'] }, () => -1));
+    ok(p && p.knocks > 0 && p.score > 100, `KI rempelt Gegner per Seil ins Hafenbecken (Score ${p ? Math.round(p.score) : '–'})`);
+  }
+  // Hubwagen am Beckenrand wird als Versenken erkannt
+  {
+    const Wd = 2400, Hd = 1200;
+    const mat = new Uint8Array(Wd * Hd);
+    for (let y = WATER_Y - 200; y < WATER_Y + 40; y++) for (let x = 900; x < 1020; x++) mat[y * Wd + x] = 1;
+    const terrain = maskTerrain(mat);
+    const self = { id: 0, team: 0, x: 980, y: WATER_Y - 200 - WORKER_R - 1, hp: 100, dead: false };
+    const foe = { id: 1, team: 1, x: 1000, y: self.y, hp: 100, dead: false };
+    const p = run(planTurn({ terrain, workers: [self, foe], self, wind: 0, waterY: WATER_Y, fallDamage: 0 }, { ...LEVELS[2], weapons: ['hubwagen'] }, () => -1));
+    ok(p?.weapon === 'hubwagen' && p.facing === 1 && p.score > 100, `KI schubst mit dem Hubwagen ins Wasser (Score ${p ? Math.round(p.score) : '–'})`);
+  }
 }
 
 if (fails) { console.error(`${fails} Fehler`); process.exit(1); }

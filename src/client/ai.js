@@ -9,6 +9,8 @@
 import { WORLD_W as W, WORLD_H as H, WATER_Y, GRAVITY, WORKER_R, RETREAT_TIME } from '../shared/constants.js';
 import { WEAPON_BY_ID } from '../shared/weapons.js';
 import { isFree } from '../shared/terrain-gen.js';
+import { newRope, fireHook, hookStep, ropeStep, knockHit, KNOCK } from '../shared/rope.js';
+import { fallDamage } from '../shared/fall.js';
 
 export const PHYS = { step: 1 / 60, windAcc: 160, walkSpeed: 60 };
 
@@ -18,9 +20,9 @@ const W_FACHKRAFT = [...W_AZUBI, 'kiste', 'scanner', 'sendung', 'stapler', 'gas'
 const W_MEISTER = [...W_FACHKRAFT, 'fass', 'drohne', 'palette', 'tresor'];
 
 export const LEVELS = {
-  1: { weapons: W_AZUBI, util: [], wind: false, retreat: false, noiseA: 0.06, noiseP: 0.045, angles: 26, powers: 11, think: 1.6, walks: 1, sloppy: 0.35 },
-  2: { weapons: W_FACHKRAFT, util: ['fallschirm', 'inventur'], wind: true, retreat: true, noiseA: 0.014, noiseP: 0.012, angles: 38, powers: 17, think: 1.1, walks: 2, sloppy: 0.1 },
-  3: { weapons: W_MEISTER, util: ['fallschirm', 'inventur', 'rucksack'], wind: true, retreat: true, noiseA: 0.006, noiseP: 0.008, angles: 52, powers: 23, think: 0.8, walks: 3, sloppy: 0 },
+  1: { weapons: W_AZUBI, util: [], wind: false, retreat: false, noiseA: 0.06, noiseP: 0.045, angles: 26, powers: 11, think: 1.6, walks: 1, sloppy: 0.35, ropes: 1, ropeAims: 6 },
+  2: { weapons: W_FACHKRAFT, util: ['fallschirm', 'inventur'], wind: true, retreat: true, noiseA: 0.014, noiseP: 0.012, angles: 38, powers: 17, think: 1.1, walks: 2, sloppy: 0.1, ropes: 2, ropeAims: 9 },
+  3: { weapons: W_MEISTER, util: ['fallschirm', 'inventur', 'rucksack'], wind: true, retreat: true, noiseA: 0.006, noiseP: 0.008, angles: 52, powers: 23, think: 0.8, walks: 3, sloppy: 0, ropes: 3, ropeAims: 16 },
 };
 
 // Grobe Planung für „Wie gut wäre es dort drüben?“ (Rucksack-Erkundung)
@@ -387,11 +389,14 @@ export function* planTurn(ctx, level, ammoOf) {
         if (o === self || o.dead) continue;
         const dx = o.x - self.x, dy = o.y - self.y;
         if (dx * facing <= -4 || !inReach(dx, dy)) continue;
+        // Wohin fliegt der Getroffene? Ins Hafenbecken = raus.
+        const kick = id === 'hubwagen' ? { vx: facing * 480, vy: -330 } : { vx: facing * 150, vy: -620 };
+        const fly = simFall(terrain, { x: o.x, y: o.y, ...kick }, waterY, 4, ctx.fallDamage !== 0);
         if (o.team !== self.team) {
           score += Math.min(wpn.damage, o.hp) + (o.hp <= wpn.damage ? 25 : 0) + 12;
-          // Wer nah am Hafenbecken steht, fliegt womöglich hinein
-          if (o.y > waterY - 140) score += 15;
-        } else score -= 45;
+          if (fly.drown) score += Math.max(0, o.hp - wpn.damage) + 40;
+          else score += Math.min(fly.dmg, Math.max(0, o.hp - wpn.damage));
+        } else score -= 45 + (fly.drown ? 80 : 0);
       }
       if (score > 0) consider({ weapon: id, facing, aim: 0, power: 1, score, near: 0 });
     }
@@ -629,6 +634,142 @@ export function* planMove(ctx, level, ammoOf, maxDist = 420) {
   return best;
 }
 
+// Freier Flug eines Arbeiters wie physicsWorker im Spiel, bis er liegt, ertrinkt
+// oder die Zeit um ist. onStep(o) darf unterwegs prüfen (z.B. Seil-Schubser).
+export function simFall(terrain, o, waterY, maxT = 4, hurt = true, onStep = null) {
+  const dt = PHYS.step;
+  let still = 0, dmg = 0;
+  for (let t = 0; t < maxT; t += dt) {
+    if (o.y > waterY + 4 || o.x < -300 || o.x > W + 300) return { x: o.x, y: o.y, drown: true, landed: false, dmg, t };
+    const ox = o.x, oy = o.y;
+    o.vy += GRAVITY * dt;
+    const vx0 = o.vx, vy0 = o.vy;
+    const n = moveCircle(terrain, o, dt, WORKER_R, 0.3);
+    if (onStep) onStep(o, t);
+    if (n) {
+      const impact = Math.max(0, -(vx0 * n.x + vy0 * n.y));
+      if (hurt && n.y < -0.3) dmg += fallDamage(impact);
+      if (n.y < -0.55 && Math.hypot(o.vx, o.vy) < 130) return { x: o.x, y: o.y, drown: false, landed: true, dmg, t };
+    }
+    still = Math.hypot(o.x - ox, o.y - oy) < 0.3 ? still + dt : 0;
+    if (still > 0.4 && terrain.hitsCircle(o.x, o.y + 1.5, WORKER_R)) return { x: o.x, y: o.y, drown: false, landed: true, dmg, t };
+  }
+  if (o.y > waterY + 4) return { x: o.x, y: o.y, drown: true, landed: false, dmg, t: maxT };
+  return { x: o.x, y: o.y, drown: false, landed: false, dmg, t: maxT };
+}
+
+// Spanngurt-Seil: Haken in verschiedene Richtungen schießen, schwingen, an
+// verschiedenen Stellen loslassen und schauen, wo man landet und wen man dabei
+// im freien Flug ins Hafenbecken rempelt (wie in den Worms-Rope-Matches).
+// Rückgabe: { facing, aim, dir, frames, score, land, knocks } oder null.
+// frames = Bilder am Seil bis zum Loslassen (1/60 s).
+export function* planRope(ctx, level, ammoOf) {
+  const L = typeof level === 'object' ? level : (LEVELS[level] || LEVELS[2]);
+  const { self, workers, terrain } = ctx;
+  const waterY = ctx.waterY ?? WATER_Y;
+  const hurt = ctx.fallDamage !== 0;
+  const enemies = workers.filter((w) => !w.dead && w.team !== self.team);
+  if (!enemies.length) return null;
+  const others = workers.filter((w) => w !== self && !w.dead);
+  const dt = PHYS.step;
+  const bounds = { w: W, waterY };
+  // Was könnte man nach der Landung von dort aus anrichten? (Nahkampf & Co., ohne Seil)
+  const melee = L.weapons.filter((id) => ['hubwagen', 'stempel'].includes(id));
+  const followCache = new Map();
+  // knocks: wer unterwegs weggerempelt wurde (liegt dann woanders oder ist ertrunken)
+  const followUp = (x, y, knocks) => {
+    const key = `${Math.round(x / 8)},${Math.round(y / 8)}`;
+    if (!knocks.length && followCache.has(key)) return followCache.get(key);
+    let v = 0;
+    if (melee.length) {
+      const ghost = { ...self, x, y };
+      const moved = new Map(knocks.map(({ v: o, fly }) => [o, fly.drown ? { ...o, dead: true } : { ...o, x: fly.x, y: fly.y }]));
+      const gctx = { ...ctx, self: ghost, workers: workers.map((w) => (w === self ? ghost : moved.get(w) || w)) };
+      const it = planTurn(gctx, { ...L, weapons: melee, retreat: false }, ammoOf);
+      let r; do { r = it.next(); } while (!r.done);
+      if (r.value && r.value.score > 0) v = r.value.score;
+    }
+    if (!knocks.length) followCache.set(key, v);
+    return v;
+  };
+  const nearestEnemy = (x, y) => Math.min(...enemies.map((o) => Math.hypot(o.x - x, o.y - y)));
+  const d0 = nearestEnemy(self.x, self.y);
+  let best = null;
+  let n = 0;
+  const aims = [];
+  for (let i = 0; i < L.ropeAims; i++) aims.push(-1.5 + (i / Math.max(1, L.ropeAims - 1)) * 1.3);
+  for (const facing of [-1, 1]) {
+    for (const aim of aims) {
+      // Haken fliegen lassen
+      const dx = Math.cos(aim) * facing, dy = Math.sin(aim);
+      const w0 = { x: self.x, y: self.y, vx: 0, vy: 0 };
+      const mv0 = newRope();
+      fireHook(mv0, w0.x + dx * WORKER_R, w0.y + dy * WORKER_R, dx, dy);
+      let hr = null;
+      for (let i = 0; i < 60 && !hr; i++) hr = hookStep(mv0, w0, dt, terrain, bounds);
+      if (hr !== 'attach') continue;
+      for (const dir of [-1, 0, 1]) {
+        const mv = { ...mv0, pts: mv0.pts.map((p) => ({ ...p })) };
+        const w = { ...w0 };
+        const row = []; // ein Eintrag je möglichem Loslass-Zeitpunkt
+        let cut = false;
+        for (let f = 1; f <= 150; f++) {
+          // Im Spiel greift die Schwungtaste erst ab dem zweiten Bild am Seil
+          const res = ropeStep(mv, w, dt, { dir: f > 1 ? dir : 0, reel: 0 }, terrain, GRAVITY, WORKER_R);
+          if (w.y > waterY + 4 || res.broke) { cut = true; break; }
+          if (f < 6 || f % 5) continue;
+          // Hier loslassen: freier Flug mit Schubsern
+          const o = { x: w.x, y: w.y, vx: w.vx, vy: w.vy };
+          const hit = new Set();
+          const knocks = [];
+          const fall = simFall(terrain, o, waterY, 3.5, hurt, (a) => {
+            for (const v of others) {
+              if (hit.has(v)) continue;
+              const k = knockHit(a, v, WORKER_R);
+              if (!k) continue;
+              hit.add(v);
+              knocks.push({ v, fly: simFall(terrain, { x: v.x, y: v.y, ...k }, waterY, 4, hurt) });
+              a.vx *= KNOCK.KEEP; a.vy *= KNOCK.KEEP;
+            }
+          });
+          n++;
+          if (fall.drown) { row.push(null); continue; }
+          let score = 0;
+          for (const { v, fly } of knocks) {
+            const enemy = v.team !== self.team;
+            const val = fly.drown ? v.hp + 40 : 6 + Math.min(fly.dmg, v.hp) + (fly.dmg >= v.hp ? 25 : 0);
+            score += enemy ? val : -1.3 * val;
+          }
+          if (!fall.landed) score -= 25;
+          else {
+            score += followUp(fall.x, fall.y, knocks);
+            if (fall.y > waterY - 50) score -= 8;
+            score -= Math.min(fall.dmg, self.hp) * 2.2 + (fall.dmg >= self.hp ? 200 : 0);
+          }
+          // Näher an den Gegner ran ist gut (nächster Zug: Hubwagen oder Rempler)
+          score += Math.max(-10, Math.min(20, (d0 - nearestEnemy(fall.x, fall.y)) * 0.04));
+          // Kaum bewegt? Dann bringt das Seil nichts.
+          if (Math.hypot(fall.x - self.x, fall.y - self.y) < 30) score -= 5;
+          row.push({ facing, aim, dir, frames: f, score, land: { x: fall.x, y: fall.y }, knocks: knocks.length, risky: !fall.landed });
+          if (n % 12 === 0) yield;
+        }
+        // Robust planen: Ein bisschen zu früh oder zu spät loslassen darf nicht ins Wasser führen.
+        for (let i = 0; i < row.length; i++) {
+          const c = row[i];
+          if (!c) continue;
+          const prev = i > 0 ? row[i - 1] : c;
+          const next = i + 1 < row.length ? row[i + 1] : (cut ? null : c);
+          let score = c.score;
+          for (const nb of [prev, next]) if (!nb) score -= 60; else if (nb.risky) score -= 10;
+          if (!best || score > best.score) best = { ...c, score };
+        }
+        yield;
+      }
+    }
+  }
+  return best;
+}
+
 // Inventurfehler als Notausgang: weit weg vom Gegner, hoch über dem Wasser.
 export function teleportSpot(ctx) {
   const { self, workers, terrain } = ctx;
@@ -664,6 +805,16 @@ export class BotController {
     this.walkDrop = 180;
     this.shotT = 0;
     this.flew = false;
+    this.ropes = 0;
+  }
+
+  // Darf/soll der Bot das Spanngurt-Seil nehmen? Im Modus „Rope only“ und auf Seil-Karten.
+  ropeOk(w) {
+    const g = this.game;
+    if (this.ropes >= (this.L.ropes || 0) || g.mv || g.timeLeft() < 6) return false;
+    if (!w.grounded) return false;
+    if (g.ammoOf('seil') === 0) return false;
+    return g.rules?.mode === 'seil' || !!g.ropeMap;
   }
 
   context(w) {
@@ -671,6 +822,7 @@ export class BotController {
     return {
       terrain: g.terrain, workers: g.workers, self: w, wind: g.turn?.wind || 0,
       waterY: g.waterY ?? WATER_Y, retreatTime: g.rules?.retreatTime ?? RETREAT_TIME,
+      fallDamage: g.rules?.fallDamage ?? 1,
     };
   }
 
@@ -690,12 +842,20 @@ export class BotController {
     switch (this.phase) {
       case 'think': {
         this.wait -= dt;
+        // Erst warten, bis der Arbeiter steht (z.B. direkt nach dem Abwurf am Zugbeginn)
+        if (!w.grounded && !hurry && (this.settle = (this.settle || 0) + dt) < 1.5) break;
         if (!this.planner) this.planner = planTurn(this.context(w), this.levelNo, (id) => g.ammoOf(id));
         const res = this.run(this.planner);
         if (!res.done) break;
         this.planner = null;
         let plan = res.value;
         const good = plan && plan.score >= 12;
+        if (!good && !hurry && this.ropeOk(w)) {
+          this.roper = planRope(this.context(w), this.levelNo, (id) => g.ammoOf(id));
+          this.fallback = plan;
+          this.phase = 'ropeplan';
+          break;
+        }
         if (!good && !hurry) {
           if (this.walks < this.L.walks && this.startWalk(w)) break;
           if (!this.flew && this.canUse('rucksack') && g.timeLeft() > 14 && w.grounded) {
@@ -735,6 +895,57 @@ export class BotController {
       case 'jet':
         this.jetStep(w, dt, hurry);
         break;
+      case 'ropeplan': {
+        if (hurry) { this.roper = null; this.commit(this.fallback); break; }
+        const res = this.run(this.roper);
+        if (!res.done) break;
+        this.roper = null;
+        this.ropes++;
+        const rp = res.value;
+        const before = this.fallback ? this.fallback.score : 0;
+        if (rp && rp.score > Math.max(3, before) && g.botSelectWeapon('seil')) {
+          // Azubis zielen und lassen ungenauer los
+          const sloppy = this.L.sloppy || 0;
+          this.rplan = { ...rp, aim: rp.aim + jitter(sloppy * 0.15), frames: Math.max(4, Math.round(rp.frames + jitter(sloppy * 12))) };
+          this.ropeSeen = 0;
+          this.phase = 'ropeaim';
+          this.wait = 0.2;
+          break;
+        }
+        // Seil bringt nichts: normal weiter (laufen, Rucksack, Kaffee …)
+        this.phase = 'think';
+        this.wait = 0;
+        break;
+      }
+      case 'ropeaim': {
+        const p = this.rplan;
+        this.keys.clear();
+        w.facing = p.facing;
+        const d = p.aim - w.aim;
+        const stepA = 2.2 * dt;
+        w.aim = Math.abs(d) <= stepA ? p.aim : w.aim + Math.sign(d) * stepA;
+        if (w.aim !== p.aim) break;
+        this.wait -= dt;
+        if (this.wait > 0 && !hurry) break;
+        g.fire(1);
+        this.phase = g.mv?.kind === 'rope' ? 'ropefly' : 'think';
+        break;
+      }
+      case 'ropefly': {
+        const p = this.rplan;
+        this.keys.clear();
+        if (!g.mv || g.mv.kind !== 'rope') {
+          // Gelandet (oder Haken ging daneben): neu überlegen, z.B. Hubwagen
+          if (w.grounded) { this.phase = 'think'; this.wait = 0.15; this.walks = Math.max(this.walks, this.L.walks - 1); }
+          break;
+        }
+        if (g.onRope()) {
+          this.ropeSeen++;
+          if (this.ropeSeen >= p.frames || hurry) { g.utilityAction(w); break; }
+          if (p.dir) this.keys.add(p.dir > 0 ? 'ArrowRight' : 'ArrowLeft');
+        }
+        break;
+      }
       case 'walk': {
         this.walkT -= dt;
         if (this.walkT <= 0 || !w.grounded || hurry

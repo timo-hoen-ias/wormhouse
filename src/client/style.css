@@ -186,3 +186,7 @@ select:disabled { opacity: 0.75; }
 .mapdesc em { color: #4dd0e1; font-style: normal; }
 #reroll { justify-self: start; }
 @media (max-width: 560px) { .mapbig { grid-template-columns: 1fr; } }
+#modes { margin-bottom: 4px; }
+#modes button.mode { font-size: 13px; padding: 6px 12px; }
+#modes button.mode.sel { background: var(--hazard); color: #1a1a1a; border-color: var(--hazard); opacity: 1; }
+#modedesc { text-align: left; margin: 0 0 10px; }

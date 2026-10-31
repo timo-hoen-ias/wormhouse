@@ -32,6 +32,17 @@ Das letzte Team mit Personal gewinnt. Allein und ohne KI-Gegner geht es gegen di
 
 Die Regeln sind in `src/shared/rules.js` als Optionslisten definiert; Lobby und Server lesen dieselbe Liste. Das Waffenlager wird aus `WEAPONS` erzeugt, neue Waffen erscheinen dort automatisch.
 
+### Spielmodus „Rope only“ (Seil-Match)
+
+Oben in den Spielregeln per Knopf wählbar (Einzelspieler und Mehrspieler), wie die Rope-Matches in Worms online:
+
+- Im Lager nur **Spanngurt-Seil (∞)** und **Hubwagen-Rempler** (unser Baseballschläger), dazu Kaffeepause.
+- 20 s Zugzeit, kein Fallschaden, kein Wind, Sudden Death nach 10 min mit steigendem Wasser.
+- Gespielt wird auf einer Seil-Karte (Kranbahn, Hängeregale oder Zufall (Seil)).
+- Schaden entsteht fast nur durchs Versenken: hinschwingen, loslassen und den Gegner im Flug rempeln, oder landen und mit dem Hubwagen ins Becken schieben.
+
+Danach lassen sich einzelne Regeln weiter anpassen; „Standard“ setzt alles zurück. Die KI schwingt im Rope-only-Modus und auf Seil-Karten selbst am Seil: Sie simuliert Haken, Schwung und Loslass-Zeitpunkt mit derselben Seilphysik, sucht Rempler ins Wasser oder einen Landeplatz direkt neben dem Gegner und haut dann mit dem Hubwagen zu.
+
 ### KI-Gegner
 
 | Stufe | Verhalten |
@@ -94,7 +105,7 @@ Die KI (`src/client/ai.js`) läuft im Browser der Schichtleitung: Sie simuliert 
 - Leertaste lässt los, der Schwung bleibt erhalten. In der Luft (mit ↑/↓ neu zielen, ←/→ Blickrichtung) kann man erneut schießen – bis zu 5× Einhaken pro Zug, danach erst wieder landen.
 - Am Gurt gibt es keinen Fallschaden, nach dem Loslassen gilt die normale Sicherheitshöhe (~160 px).
 - Vom Seil aus kann man Waffe wählen und Abwurfwaffen einsetzen (Granaten fallen mit dem eigenen Schwung, Gasflasche, Amok-Stapler) oder Zielwaffen anklicken. Danach läuft die Rückzugszeit, man hängt weiter und lässt mit Leertaste los.
-- Wer am Seil in andere Arbeiter kracht, schubst sie weg (ohne Schaden).
+- Am Seil hängend schubst man niemanden. Erst wer **loslässt** und im freien Flug in andere Arbeiter kracht, rempelt sie weg (ohne Schaden, aber gern ins Hafenbecken) – wie in Worms.
 
 ### Fallschaden
 
