@@ -81,7 +81,7 @@ function joinRoom(code, wantSolo = false) {
   net = new Net(code, {
     open() {
       $('conn').classList.add('hidden');
-      net.send({ t: 'join', pid, name, solo: wantSolo });
+      net.send({ t: 'join', pid, name, solo: wantSolo, botLevel: prefLevel() });
     },
     close() { $('conn').classList.remove('hidden'); },
     message: onMessage,
@@ -128,8 +128,31 @@ $('copylink').onclick = async () => {
 };
 $('start').onclick = () => net?.send({ t: 'start' });
 $('rematch').onclick = () => net?.send({ t: 'start' });
-$('botlevel').innerHTML = BOT_LEVELS.map((b) => `<option value="${b.level}"${b.level === 2 ? ' selected' : ''}>${esc(b.name)} – ${esc(b.desc)}</option>`).join('');
+// KI-Stärke: zuletzt gewählte Stufe merken (Einzelspieler & neue KI-Teams)
+const prefLevel = () => Math.max(1, Math.min(BOT_LEVELS.length - 1, +storage('wh.botlevel', 2) || 2));
+const levelOptions = (sel, withDummy = true) => BOT_LEVELS.filter((b) => withDummy || b.level > 0)
+  .map((b) => `<option value="${b.level}"${b.level === sel ? ' selected' : ''} title="${esc(b.desc)}">${esc(b.name)} – ${esc(b.desc)}</option>`).join('');
+$('sololevel').innerHTML = levelOptions(prefLevel(), false);
+$('botlevel').innerHTML = levelOptions(prefLevel());
+$('sololevel').onchange = () => { store('wh.botlevel', $('sololevel').value); $('botlevel').value = $('sololevel').value; };
+$('botlevel').onchange = () => { if (+$('botlevel').value > 0) { store('wh.botlevel', $('botlevel').value); $('sololevel').value = $('botlevel').value; } };
 $('addbot').onclick = () => net?.send({ t: 'addBot', level: +$('botlevel').value });
+$('allbots').onchange = () => {
+  const level = +$('allbots').value;
+  if (!state || !Number.isFinite(level)) return;
+  for (const b of state.bots) net?.send({ t: 'bot', id: b.id, level });
+  $('allbots').value = '';
+};
+// Während der Schicht: Schichtleitung klickt auf die Stufe eines KI-Teams, um sie zu ändern
+$('teams').addEventListener('pointerdown', (e) => {
+  const el = e.target.closest('[data-lvlteam]');
+  if (!el || !state || state.hostPid !== myPid) return;
+  e.stopPropagation();
+  const t = state.teams[+el.dataset.lvlteam];
+  if (!t || !(t.bot > 0)) return;
+  const level = t.bot >= BOT_LEVELS.length - 1 ? 1 : t.bot + 1;
+  net?.send({ t: 'botLevel', team: +el.dataset.lvlteam, level });
+});
 $('tolobby').onclick = () => net?.send({ t: 'lobby' });
 function renderAudioButtons() {
   $('mute').textContent = isMuted() ? '🔇' : '🔊';
@@ -273,6 +296,8 @@ function renderLobby() {
     renderRules(isHost);
     const teams = state.players.length + state.bots.length;
     $('addbotrow').classList.toggle('hidden', !isHost || teams >= MAX_TEAMS);
+    $('allbotsrow').classList.toggle('hidden', !isHost || state.bots.length < 2);
+    if (!$('allbots').options.length) $('allbots').innerHTML = `<option value="">🤖 Alle KI-Teams auf …</option>${levelOptions(-1)}`;
     $('hostcontrols').classList.toggle('hidden', !isHost);
     $('waithost').classList.toggle('hidden', isHost);
     $('start').textContent = state.bots.length || state.players.length > 1 ? 'Schicht beginnen!' : 'Übungsschicht starten';
@@ -316,6 +341,13 @@ function renderWeapons() {
   $('weaponinfo').classList.toggle('hidden', !game.myTurn);
 }
 
+// Kleine Stufen-Plakette hinter KI-Teams; für die Schichtleitung klickbar.
+function lvlTag(t, i) {
+  const lvl = BOT_LEVELS[t.bot] || BOT_LEVELS[2];
+  const host = state.hostPid === myPid;
+  return `<span class="lvl${host ? ' edit' : ''}" ${host ? `data-lvlteam="${i}" title="KI-Stärke ändern (gilt ab dem nächsten Zug)"` : `title="${esc(lvl.desc)}"`}>${esc(lvl.name)}</span>`;
+}
+
 let lastSecond = -1;
 function updateHud() {
   if (!state || state.phase === 'lobby') return;
@@ -327,7 +359,7 @@ function updateHud() {
     const max = (state.rules?.workersPerTeam || 3) * (state.rules?.hp || MAX_HP);
     const conn = !t.pid || state.players.find((p) => p.pid === t.pid)?.connected;
     return `<div class="teambar ${hp <= 0 ? 'off' : ''} ${turn && turn.team === i ? 'current' : ''}">
-      <span class="tname" style="color:${t.color}">${t.bot ? '🤖 ' : ''}${esc(t.name)}${conn ? '' : ' 💤'}</span>
+      <span class="tname" style="color:${t.color}">${t.bot ? '🤖 ' : ''}${esc(t.name)}${conn ? '' : ' 💤'}</span>${t.bot > 0 ? lvlTag(t, i) : ''}
       <div class="bar"><div class="fill" style="width:${(hp / max) * 100}%;background:${t.color}"></div></div>
       <span>${hp}</span></div>`;
   }).join('');
