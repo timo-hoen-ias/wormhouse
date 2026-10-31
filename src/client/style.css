@@ -163,3 +163,26 @@ label.ammo.off span { opacity: 0.45; text-decoration: line-through; }
 select:disabled { opacity: 0.75; }
 #hostcontrols { display: flex; }
 #sudden { position: absolute; top: 64px; right: 14px; background: #b71c1c; color: #fff; font-weight: 900; padding: 4px 10px; border-radius: 8px; font-size: 12px; animation: bob 0.6s infinite alternate; }
+
+/* Kartenwahl */
+.mapsection { margin-bottom: 10px; }
+.mapgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 8px; }
+.mapcard { position: relative; display: flex; flex-direction: column; align-items: stretch; gap: 4px; padding: 5px; font-size: 12px; font-weight: 700; text-align: left; }
+.mapcard canvas, .mapdice { width: 100%; aspect-ratio: 2 / 1; border-radius: 5px; background: #161a22; display: block; }
+.mapdice { display: flex; align-items: center; justify-content: center; font-size: 28px; }
+.mapcard span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mapcard i { position: absolute; top: 8px; right: 8px; font-style: normal; font-size: 10px; background: #00acc1; color: #06141a; padding: 1px 6px; border-radius: 6px; }
+.mapcard.sel { border-color: var(--hazard); box-shadow: 0 0 0 2px var(--hazard) inset; }
+.mapcard:disabled { opacity: 0.5; }
+.mapcard.sel:disabled { opacity: 1; }
+.maprow { display: flex; align-items: center; gap: 10px; margin: 10px 0 8px; font-size: 12px; color: var(--muted); flex-wrap: wrap; }
+.seg { display: flex; gap: 4px; flex-wrap: wrap; }
+.seg button.sel { background: var(--hazard); color: #1a1a1a; border-color: var(--hazard); opacity: 1; }
+.mapbig { display: grid; grid-template-columns: minmax(0, 240px) 1fr; gap: 6px 12px; align-items: start; font-size: 12px; color: var(--muted); }
+.mapbig canvas, .mapdice.big { width: 100%; aspect-ratio: 2 / 1; border-radius: 6px; grid-row: span 2; }
+.mapdice.big { flex-direction: column; font-size: 34px; background: #161a22; }
+.mapdice.big small { font-size: 11px; color: var(--muted); }
+.mapdesc b { color: var(--text); }
+.mapdesc em { color: #4dd0e1; font-style: normal; }
+#reroll { justify-self: start; }
+@media (max-width: 560px) { .mapbig { grid-template-columns: 1fr; } }

@@ -8,8 +8,8 @@ const GIRDER_LEN = 130;
 const GIRDER_THICK = 12;
 
 export class Terrain {
-  constructor(seed) {
-    this.mat = generateTerrain(seed);
+  constructor(seed, map = null) {
+    this.mat = generateTerrain(seed, map?.id, map?.complexity);
     this.canvas = document.createElement('canvas');
     this.canvas.width = W;
     this.canvas.height = H;

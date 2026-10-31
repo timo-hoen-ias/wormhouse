@@ -7,6 +7,7 @@ import {
 import { BotController } from './ai.js';
 import { WEAPON_BY_ID, WEAPON_CATS, PROJECTILE_TYPES, AIM_KINDS } from '../shared/weapons.js';
 import { findSpawns, isFree } from '../shared/terrain-gen.js';
+import { MAP_BY_ID, COMPLEXITY } from '../shared/maps.js';
 import { Terrain } from './terrain.js';
 import { fallDamage } from '../shared/fall.js';
 import { sfx, setLoop } from './audio.js';
@@ -167,7 +168,9 @@ export class Game {
 
   newGame(state) {
     this.gameNo = state.game;
-    this.terrain = new Terrain(state.seed);
+    this.terrain = new Terrain(state.seed, state.map);
+    const m = MAP_BY_ID[state.map?.id];
+    if (m) this.ui.toast?.(`${m.icon} ${m.name} · ${COMPLEXITY[state.map.complexity]?.name ?? ''}`, '#ffc400');
     const spawns = findSpawns(this.terrain.mat, state.seed, state.workers.length);
     this.spawns = spawns;
     this.renderer.setTerrain(this.terrain);

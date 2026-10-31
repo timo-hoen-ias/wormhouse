@@ -4,6 +4,8 @@ import { WEAPONS, WEAPON_CATS, PROJECTILE_TYPES } from '../src/shared/weapons.js
 import { WORKER_R, WATER_Y, GRAVITY } from '../src/shared/constants.js';
 import { fallDamage } from '../src/shared/fall.js';
 import { sanitizeRules, defaultRules, ammoFromRules, configurableWeapons, AMMO_PRESETS } from '../src/shared/rules.js';
+import { MAPS, MAP_CHOICES, COMPLEXITY, resolveMap, isRopeMap } from '../src/shared/maps.js';
+import { ROPE } from '../src/shared/rope.js';
 import { planTurn, planMove, teleportSpot, maskTerrain, LEVELS } from '../src/client/ai.js';
 
 let fails = 0;
@@ -102,6 +104,67 @@ for (const lvl of [1, 3]) {
   ok(tp.every((s, i) => s && isFree(setups[i].mat, s.x, s.y, WORKER_R + 1) && s.y < WATER_Y - 60), 'Inventurfehler-Ziele sind frei und trocken');
   const lvlW = (n) => LEVELS[n].weapons.length + LEVELS[n].util.length;
   ok(lvlW(1) < lvlW(2) && lvlW(2) < lvlW(3), 'Höhere KI-Stufen nutzen mehr vom Lager');
+}
+
+// Karten: jede Halle in jeder Komplexität deterministisch, bespielbar und für die KI lösbar
+{
+  const run = (it) => { let r; do { r = it.next(); } while (!r.done); return r.value; };
+  const W = 2400;
+  for (const m of MAPS) {
+    let det = true, spawnsOk = true, fill = [], surfaces = [], anchors = true, aiGood = 0, aiTries = 0;
+    for (const c of COMPLEXITY.map((x) => x.level)) {
+      for (const seed of [5, 99, 31337]) {
+        const a = generateTerrain(seed, m.id, c), b = generateTerrain(seed, m.id, c);
+        for (let i = 0; det && i < a.length; i += 53) det = a[i] === b[i];
+        const sp = findSpawns(a, seed, 36);
+        if (!sp.every(([x, y]) => isFree(a, x, y, WORKER_R) && y < WATER_Y - 20 && y > 0)) spawnsOk = false;
+        // Anteil fester Zellen + Anzahl begehbarer Oberflächen (Maß für Verwinkeltheit)
+        let solid = 0, surf = 0;
+        for (let i = W; i < a.length; i++) { if (a[i]) { solid++; if (!a[i - W]) surf++; } }
+        fill.push(solid / a.length); surfaces.push(surf);
+        if (m.rope) {
+          // Von jedem Startplatz aus hakt das Seil irgendwo oben ein.
+          for (const [sx, sy] of sp) {
+            let hit = false;
+            for (let k = 0; k < 24 && !hit; k++) {
+              const ang = -Math.PI * (0.08 + 0.84 * (k / 23));
+              for (let d = 20; d < ROPE.MAX; d += 4) {
+                const x = Math.round(sx + Math.cos(ang) * d), y = Math.round(sy + Math.sin(ang) * d);
+                if (x < 0 || x >= W || y < 0) break;
+                if (a[y * W + x]) { hit = true; break; }
+              }
+            }
+            if (!hit) anchors = false;
+          }
+        }
+        if (c === 1 && !m.rope) {
+          const terrain = maskTerrain(a);
+          const s8 = findSpawns(a, seed, 6);
+          for (let i = 0; i + 1 < s8.length; i += 2) {
+            const self = { id: 0, team: 0, x: s8[i][0], y: s8[i][1], hp: 100, dead: false };
+            const foe = { id: 1, team: 1, x: s8[i + 1][0], y: s8[i + 1][1], hp: 100, dead: false };
+            aiTries++;
+            if (run(planTurn({ terrain, workers: [self, foe], self, wind: 0.3, waterY: WATER_Y }, 3, () => -1))?.score > 0) aiGood++;
+          }
+        }
+      }
+    }
+    ok(det, `Karte ${m.name}: deterministisch in allen Komplexitäten`);
+    ok(spawnsOk, `Karte ${m.name}: 36 Startplätze frei und trocken`);
+    const byC = [0, 1, 2, 3].map((c) => fill.slice(c * 3, c * 3 + 3).reduce((x, y) => x + y) / 3);
+    const sC = [0, 1, 2, 3].map((c) => Math.round(surfaces.slice(c * 3, c * 3 + 3).reduce((x, y) => x + y) / 3));
+    ok(sC[0] < sC[1] && sC[1] < sC[3], `Karte ${m.name}: Komplexität macht die Halle verwinkelter (${sC.join(' → ')} Oberflächen-px)`);
+    if (m.rope) ok(anchors && byC[1] < 0.2, `Seil-Karte ${m.name}: viel Luft (${(byC[1] * 100).toFixed(0)}% fest) und von jedem Startplatz erreichbare Ankerpunkte`);
+    if (aiTries) ok(aiGood / aiTries >= 0.5, `Karte ${m.name}: KI Stufe 3 trifft in ${aiGood}/${aiTries} Lagen`);
+  }
+  ok(generateTerrain(42).every((v, i, arr) => i % 101 || v === generateTerrain(42, 'lager', 1)[i]), 'Standardkarte = Hochregallager, normal');
+  const picks = new Set(Array.from({ length: 200 }, (_, i) => resolveMap('zufall', () => (i % 50) / 50)));
+  ok([...picks].every((id) => !isRopeMap(id)) && picks.size === MAPS.filter((x) => !x.rope).length, 'Zufall wählt nur normale Karten, aber alle');
+  ok(isRopeMap(resolveMap('zufall-seil')) && resolveMap('keller') === 'keller', 'Zufall (Seil) wählt Seil-Karten, feste Wahl bleibt');
+  const rr = sanitizeRules({ map: 'kranbahn', complexity: 3 });
+  const rb = sanitizeRules({ map: 'gibtsnicht', complexity: 9 });
+  ok(rr.map === 'kranbahn' && rr.complexity === 3 && rb.map === defaultRules().map && rb.complexity === defaultRules().complexity, 'Regeln: Kartenwahl wird geprüft');
+  ok(MAP_CHOICES.every((x) => x.name && x.icon && x.desc), 'Alle Karten haben Name, Symbol und Beschreibung');
 }
 
 if (fails) { console.error(`${fails} Fehler`); process.exit(1); }

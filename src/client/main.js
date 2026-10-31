@@ -5,6 +5,7 @@ import { Game } from './game.js';
 import { WEAPONS, WEAPON_BY_ID, WEAPON_CATS } from '../shared/weapons.js';
 import { MAX_HP, WORLD_W, WORLD_H, TEAM_COLORS } from '../shared/constants.js';
 import { RULES, AMMO_OPTIONS, AMMO_PRESETS, BOT_LEVELS, MAX_TEAMS, configurableWeapons, ammoFromRules } from '../shared/rules.js';
+import { renderMapPicker } from './mappicker.js';
 import { unlockAudio, setMuted, isMuted, setMusicOn, isMusicOn, setMusicMode, startAmbience, audioReady } from './audio.js';
 
 const $ = (id) => document.getElementById(id);
@@ -302,6 +303,8 @@ function renderLobby() {
   if (inLobby) {
     renderTeams(isHost);
     renderRules(isHost);
+    $('mapnote').textContent = isHost ? '' : '(wählt die Schichtleitung)';
+    renderMapPicker($('mappicker'), { rules: state.rules, seed: state.mapSeed ?? 1, isHost, send: sendRules, reroll: () => net?.send({ t: 'reroll' }) });
     const teams = state.players.length + state.bots.length;
     $('addbotrow').classList.toggle('hidden', !isHost || teams >= MAX_TEAMS);
     $('allbotsrow').classList.toggle('hidden', !isHost || state.bots.filter((b) => !b.human).length < 2);

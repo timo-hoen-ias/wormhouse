@@ -3,6 +3,7 @@
 // lesen dieselben Definitionen. Waffen-Munition wird aus der Waffenliste
 // abgeleitet, neue Waffen tauchen also automatisch in den Einstellungen auf.
 import { WEAPONS } from './weapons.js';
+import { MAP_CHOICE_IDS, COMPLEXITY, DEFAULT_MAP, DEFAULT_COMPLEXITY } from './maps.js';
 
 export const RULES = [
   { key: 'turnTime', label: 'Zugzeit', def: 45,
@@ -42,13 +43,20 @@ export const AMMO_PRESETS = {
 export function defaultRules() {
   const r = Object.fromEntries(RULES.map((d) => [d.key, d.def]));
   r.ammo = {};
+  r.map = DEFAULT_MAP; // Karten-ID aus maps.js oder 'zufall' / 'zufall-seil'
+  r.complexity = DEFAULT_COMPLEXITY;
   return r;
 }
 
 // Nimmt beliebige (Client-)Eingaben und gibt gültige Regeln zurück.
 export function sanitizeRules(input, base = defaultRules()) {
-  const out = { ...base, ammo: { ...(base.ammo || {}) } };
+  const def = defaultRules();
+  const out = { ...def, ...base, ammo: { ...(base.ammo || {}) } };
+  if (!MAP_CHOICE_IDS.has(out.map)) out.map = def.map;
+  if (!COMPLEXITY.some((c) => c.level === out.complexity)) out.complexity = def.complexity;
   if (!input || typeof input !== 'object') return out;
+  if ('map' in input && MAP_CHOICE_IDS.has(input.map)) out.map = input.map;
+  if ('complexity' in input && COMPLEXITY.some((c) => c.level === +input.complexity)) out.complexity = +input.complexity;
   for (const d of RULES) {
     if (!(d.key in input)) continue;
     const v = +input[d.key];

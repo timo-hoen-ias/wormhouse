@@ -16,8 +16,11 @@ import {
   defaultRules, sanitizeRules, ammoFromRules, BOT_LEVELS, BOT_TEAM_NAMES, MAX_TEAMS,
   SUDDEN_WATER_STEP, MIN_WATER_Y,
 } from '../shared/rules.js';
+import { resolveMap, isRopeMap, DEFAULT_MAP, DEFAULT_COMPLEXITY } from '../shared/maps.js';
 
 const CHAT_KEEP = 40;
+
+const newSeed = () => (Math.random() * 2 ** 31) >>> 0;
 
 function freshState() {
   return {
@@ -28,6 +31,8 @@ function freshState() {
     bots: [], // {id, name, color, level, human} – human = lokaler Spieler am Gerät der Schichtleitung (Hotseat)
     rules: defaultRules(),
     seed: 0,
+    mapSeed: newSeed(), // Seed der nächsten Karte (Vorschau in der Lobby)
+    map: { id: DEFAULT_MAP, complexity: DEFAULT_COMPLEXITY }, // aufgelöste Karte des laufenden Spiels
     teams: [], // {pid|null, bot (Stufe, 0 = keiner), name, color, ammo, nextWorker}
     workers: [], // {id, team, name, x, y, hp, dead}
     turn: null, // {n, team, worker, wind, endsAt}
@@ -173,14 +178,19 @@ export class GameRoom extends DurableObject {
       // Allein ohne Gegner: Zielscheiben aufstellen (Übungsmodus).
       bots.push({ name: BOT_TEAM_NAMES[0], color: '#9e9e9e', level: 0 });
     }
-    s.seed = (Math.random() * 2 ** 31) >>> 0;
+    s.seed = s.mapSeed || newSeed();
+    s.mapSeed = newSeed(); // Revanche/nächste Lobby bekommt eine frische Halle
+    s.map = { id: resolveMap(r.map), complexity: r.complexity };
     s.game += 1;
+    const ammo = ammoFromRules(r);
+    // Seil-Karten: Spanngurt unbegrenzt, sofern die Schichtleitung nichts anderes eingestellt hat.
+    if (isRopeMap(s.map.id) && r.ammo?.seil == null) ammo.seil = -1;
     s.teams = [
       ...humans.map((p) => ({ pid: p.pid, bot: 0, name: p.team || p.name, color: p.color })),
       ...bots.map((b) => (b.human
         ? { pid: null, bot: 0, local: true, botId: b.id ?? null, name: b.name, color: b.color }
         : { pid: null, bot: b.level, botId: b.id ?? null, name: b.name, color: b.color })),
-    ].map((t) => ({ ...t, ammo: ammoFromRules(r), nextWorker: 0 }));
+    ].map((t) => ({ ...t, ammo: { ...ammo }, nextWorker: 0 }));
     const names = [...WORKER_NAMES].sort(() => Math.random() - 0.5);
     s.workers = [];
     let id = 0;
@@ -380,6 +390,15 @@ export class GameRoom extends DurableObject {
       case 'rules': {
         if (!this.isHost(att) || s.phase !== 'lobby') return;
         s.rules = sanitizeRules(msg.rules, s.rules);
+        await this.save();
+        this.broadcastState();
+        break;
+      }
+
+      case 'reroll': {
+        // Schichtleitung würfelt eine neue Halle (Vorschau = das, was gespielt wird)
+        if (!this.isHost(att) || s.phase !== 'lobby') return;
+        s.mapSeed = newSeed();
         await this.save();
         this.broadcastState();
         break;
