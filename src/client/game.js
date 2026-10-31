@@ -5,7 +5,7 @@ import {
   WORLD_W as W, WORLD_H as H, WATER_Y, GRAVITY, WORKER_R, MAX_HP, RETREAT_TIME,
 } from '../shared/constants.js';
 import { BotController } from './ai.js';
-import { WEAPON_BY_ID, PROJECTILE_TYPES } from '../shared/weapons.js';
+import { WEAPON_BY_ID, WEAPON_CATS, PROJECTILE_TYPES, AIM_KINDS } from '../shared/weapons.js';
 import { findSpawns, isFree } from '../shared/terrain-gen.js';
 import { Terrain } from './terrain.js';
 import { fallDamage } from '../shared/fall.js';
@@ -14,6 +14,14 @@ import { sfx, setLoop } from './audio.js';
 const STEP = 1 / 60;
 const WIND_ACC = 160;
 const SNAP_INTERVAL = 50;
+// Spanngurt-Seil
+const ROPE_MAX = 420;
+const ROPE_MIN = 12;
+const ROPE_SHOTS = 5;
+const ROPE_SPEED = 1500;
+// Gummi-Expander
+const BUNGEE_REST = 70;
+const BUNGEE_K = 16;
 
 const r1 = (v) => Math.round(v * 10) / 10;
 
@@ -58,6 +66,10 @@ export class Game {
     this.walker = null;
     this.graves = [];
     this.lastFuse = new Map();
+    this.mv = null; // aktives Hilfsmittel: {kind:'rope'|'jet'|'chute'|'bungee', ...}
+    this.burst = null; // Elektrotacker-Dauerfeuer
+    this.drill = null; // Bohrhammer
+    this.homeTarget = null; // Ziel der Sendungsverfolgung
   }
 
   // ---------- Hilfen ----------
@@ -191,6 +203,11 @@ export class Game {
     this.syncWorkersFromServer(state.workers);
     this.projectiles = [];
     this.walker = null;
+    this.mv = null;
+    this.burst = null;
+    this.drill = null;
+    this.homeTarget = null;
+    this.remote.mv = null;
     this.charge = 0;
     this.charging = false;
     this.used = [];
@@ -268,6 +285,7 @@ export class Game {
     this.remote.charge = msg.ch;
     this.remote.aiming = !!msg.am;
     this.remote.retreat = msg.rt || 0;
+    this.remote.mv = msg.mv || null;
     if (msg.tl != null) this.turnLocalEnd = performance.now() + msg.tl * 1000;
   }
 
@@ -277,12 +295,13 @@ export class Game {
 
   playFx(f) {
     switch (f.k) {
-      case 'laser': this.renderer.laser(f.x1, f.y1, f.x2, f.y2); sfx.laser(); break;
+      case 'laser': this.renderer.laser(f.x1, f.y1, f.x2, f.y2, f.c); if (f.c) sfx.tack(); else sfx.laser(); break;
       case 'puff': this.renderer.puff(f.x, f.y, f.c); break;
       case 'splash': this.renderer.splash(f.x); sfx.splash(); break;
       case 'sfx': sfx[f.s]?.(); break;
       case 'msg': this.ui.toast(f.text, f.color); break;
       case 'anim': this.renderer.workerAnim(f.id, f.a); break;
+      case 'float': this.renderer.floatText(f.x, f.y, f.text, f.c); break;
       case 'fall': {
         // Harte Landung: Staub, Schwindel, „Autsch!“
         this.renderer.dust(f.x, f.y + WORKER_R, Math.min(2, 0.6 + f.d / 25));
@@ -318,6 +337,7 @@ export class Game {
     const wpn = WEAPON_BY_ID[id];
     if (!wpn || this.ammoOf(id) === 0) return;
     if (this.weapon === 'scanner' && this.shotsLeft < (WEAPON_BY_ID.scanner.shots)) return;
+    if (this.weapon !== id) this.homeTarget = null;
     this.weapon = id;
     this.myWeapon = id;
     this.shotsLeft = wpn.shots || 1;
@@ -333,6 +353,14 @@ export class Game {
     return true;
   }
 
+  // Taste für ein Fach im Waffenregal: erste verfügbare Waffe, bei erneutem Drücken die nächste.
+  selectCategory(ci) {
+    const list = (WEAPON_CATS[ci] || []).filter((w) => this.ammoOf(w.id) !== 0);
+    if (!list.length) return;
+    const cur = list.findIndex((w) => w.id === this.weapon);
+    this.selectWeapon(list[(cur + 1) % list.length].id);
+  }
+
   keyDown(code) {
     this.keys.add(code);
     if (!this.myTurn) return;
@@ -341,7 +369,11 @@ export class Game {
     const wpn = WEAPON_BY_ID[this.weapon];
     if (code === 'Space') {
       if (this.walker && !this.walker.dead) { this.explodeProjectile(this.walker); return; }
-      if (this.tp !== 'aim' || wpn.target) return;
+      if (this.drill) { this.stopDrill(); return; }
+      // Aktives Hilfsmittel bedienen (loslassen, abschalten, neu schießen)
+      if (this.mv && (wpn.kind === this.mv.kind || this.tp !== 'aim')) { this.utilityAction(w); return; }
+      if (this.tp !== 'aim' || (wpn.target && !wpn.charge)) return;
+      if (wpn.kind === 'homing' && !this.homeTarget) { this.ui.toast('Erst den Empfänger anklicken!', '#00e5ff'); return; }
       if (wpn.charge) { if (!this.charging) { this.charging = true; this.charge = 0; } }
       else this.fire(1);
     } else if (code === 'Enter' && this.canAct() && w.grounded) {
@@ -362,6 +394,12 @@ export class Game {
     if (!this.myTurn || this.tp !== 'aim') return false;
     const wpn = WEAPON_BY_ID[this.weapon];
     if (!wpn.target) return false;
+    if (wpn.kind === 'homing') {
+      this.homeTarget = { x, y };
+      sfx.beep();
+      this.ui.toast('Empfänger gespeichert – jetzt mit Leertaste abschicken.', '#00e5ff');
+      return true;
+    }
     this.fire(1, { x, y });
     return true;
   }
@@ -458,10 +496,13 @@ export class Game {
     setLoop('hiss', !!gas, gas && gas.fuse != null ? Math.max(0, 1 - gas.fuse / 5) : 0);
     const charge = this.sim ? (this.charging ? this.charge : 0) : (this.remote.aiming ? this.remote.charge : 0);
     setLoop('charge', playing && charge > 0, charge);
+    setLoop('drone', playing && this.projectiles.some((p) => p.type === 'drohne' && !p.dead));
+    const gear = this.sim ? this.gearState() : this.remote.mv;
+    setLoop('jet', playing && !!gear && gear.k === 'jet' && !!gear.on);
   }
 
   stopLoops() {
-    setLoop('engine', false); setLoop('hiss', false); setLoop('charge', false);
+    for (const l of ['engine', 'hiss', 'charge', 'drone', 'jet']) setLoop(l, false);
   }
 
   simStep(dt) {
@@ -469,20 +510,34 @@ export class Game {
     const now = performance.now();
     if (this.tp === 'aim' && this.timeLeft() <= 0) { this.tp = 'resolve'; this.charging = false; }
     if (this.tp === 'retreat' && now >= this.retreatEnd) this.tp = 'resolve';
-    if ((this.tp === 'aim' || this.tp === 'retreat') && (!w || w.dead)) this.tp = 'resolve';
+    if ((this.tp === 'aim' || this.tp === 'retreat' || this.tp === 'control') && (!w || w.dead)) this.tp = 'resolve';
+    // „control“: Drohne fliegt, Tacker feuert, Bohrhammer bohrt – danach erst Rückzug
+    if (this.tp === 'control' && !this.burst && !this.drill && !(this.walker && !this.walker.dead && this.walker.type === 'drohne')) {
+      this.tp = 'retreat';
+      this.retreatEnd = now + RETREAT_TIME * 1000;
+    }
+    // Zugende: Seil, Rucksack und Expander lösen sich (der Fallschirm bleibt offen)
+    if (this.mv && (this.tp === 'resolve' || !w || w.dead) && this.mv.kind !== 'chute') this.endUtility();
 
     if (this.ai && w && !w.dead) this.ai.update(dt);
-    if (w && !w.dead && (this.tp === 'aim' || this.tp === 'retreat')) this.handleInput(w, dt);
+    if (w && !w.dead && (this.tp === 'aim' || this.tp === 'retreat' || this.tp === 'control')) this.handleInput(w, dt);
     else if (w) w.walking = false;
+    if (this.burst && w && !w.dead) this.burstStep(w, dt);
+    if (this.drill && w && !w.dead) this.drillStep(w, dt);
 
-    for (const wk of this.workers) if (!wk.dead) this.physicsWorker(wk, dt);
+    for (const wk of this.workers) {
+      if (wk.dead) continue;
+      if (wk === w && this.drill) continue; // Bohrhammer bewegt den Arbeiter selbst
+      if (wk === w && this.mv) this.utilityPhysics(wk, dt);
+      else this.physicsWorker(wk, dt);
+    }
     for (const p of this.projectiles) this.updateProjectile(p, dt);
     this.projectiles = this.projectiles.filter((p) => !p.dead);
     if (this.walker?.dead) this.walker = null;
 
     if (this.tp === 'resolve') {
       this.resolveTime += dt;
-      const settled = this.projectiles.length === 0 && this.workers.every((x) => x.dead || x.grounded);
+      const settled = this.projectiles.length === 0 && !this.mv && this.workers.every((x) => x.dead || x.grounded);
       this.settleTime = settled ? this.settleTime + dt : 0;
       if (this.settleTime > 0.8 || this.resolveTime > 15) this.endTurn();
     }
@@ -495,14 +550,33 @@ export class Game {
     const up = k.has('ArrowUp') || k.has('KeyW');
     const down = k.has('ArrowDown') || k.has('KeyS');
     const wpn = WEAPON_BY_ID[this.weapon];
-
     w.walking = false;
+
+    // Drohne in der Luft: Pfeiltasten lenken die Drohne, nicht den Arbeiter
+    const drone = this.walker && !this.walker.dead && this.walker.type === 'drohne' ? this.walker : null;
+    if (drone) {
+      if (left !== right) drone.heading += (right ? 1 : -1) * dt * 2.8;
+      if (up !== down) drone.heading += (down ? 1 : -1) * dt * 2.8 * (Math.cos(drone.heading) < 0 ? -1 : 1);
+      return;
+    }
+    if (this.tp === 'control') {
+      // Während Dauerfeuer nur nachzielen
+      if (this.burst && up !== down) w.aim = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, w.aim + (up ? -1 : 1) * dt * this.aimSpeed * 0.6));
+      return;
+    }
+
+    const mv = this.mv;
     if (left !== right && !this.charging) {
       const dir = left ? -1 : 1;
       w.facing = dir;
-      if (w.grounded) { this.walk(w, dir); w.walking = true; }
+      if (w.grounded && !(mv && mv.kind === 'rope' && mv.pts)) { this.walk(w, dir); w.walking = true; }
     }
-    if (up !== down && this.tp === 'aim') {
+    // Am Seil steuern ↑/↓ die Seillänge, sonst den Zielwinkel
+    if (mv?.kind === 'rope' && mv.pts) {
+      if (up !== down) mv.len = Math.max(ROPE_MIN, Math.min(ROPE_MAX, mv.len + (up ? -1 : 1) * dt * 190));
+    } else if (mv?.kind === 'jet') {
+      // ↑ ist Schub
+    } else if (up !== down && this.tp === 'aim') {
       if (wpn.kind === 'girder') this.girderAngle += (up ? -1 : 1) * dt * 1.5;
       else w.aim = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, w.aim + (up ? -1 : 1) * dt * this.aimSpeed));
     }
@@ -560,29 +634,298 @@ export class Game {
     return null;
   }
 
-  physicsWorker(w, dt) {
+  // m (optional): { force(w, dt), post(w, dt), safe: kein Fallschaden, float: nie „gelandet“ }
+  physicsWorker(w, dt, m = null) {
     // Im Gelände steckengeblieben (z.B. Brücke drauf gebaut)? Nach oben schieben.
     if (this.terrain.hitsCircle(w.x, w.y, WORKER_R)) {
       for (let i = 0; i < 40 && this.terrain.hitsCircle(w.x, w.y, WORKER_R); i++) w.y -= 1;
     }
     if (w.y > this.waterY + 4) { this.drown(w); return; }
     if (w.grounded) {
-      if (this.isGrounded(w, WORKER_R)) { w.vx = 0; w.vy = 0; return; }
+      if (!m?.float && this.isGrounded(w, WORKER_R)) { w.vx = 0; w.vy = 0; return; }
       w.grounded = false;
     }
     const ox = w.x, oy = w.y;
     w.vy += GRAVITY * dt;
-    const res = this.moveCircle(w, dt, WORKER_R, 0.3);
+    if (m?.force) m.force(w, dt);
+    const res = this.moveCircle(w, dt, WORKER_R, m?.bounce ?? 0.3);
+    if (m?.post) m.post(w, dt);
     if (res) {
-      const dmg = this.rules.fallDamage === 0 ? 0 : fallDamage(res.impact);
+      const dmg = m?.safe || this.rules.fallDamage === 0 ? 0 : fallDamage(res.impact);
       if (dmg > 0 && res.n.y < -0.3) this.fallHurt(w, dmg);
-      if (res.n.y < -0.55 && Math.hypot(w.vx, w.vy) < 130) {
+      if (!m?.float && res.n.y < -0.55 && Math.hypot(w.vx, w.vy) < 130) {
         w.grounded = true; w.vx = 0; w.vy = 0;
       }
     }
     w.still = Math.hypot(w.x - ox, w.y - oy) < 0.3 ? w.still + dt : 0;
-    if (w.still > 0.4 && this.isGrounded(w, WORKER_R)) { w.grounded = true; w.vx = 0; w.vy = 0; }
+    if (!m?.float && w.still > 0.4 && this.isGrounded(w, WORKER_R)) { w.grounded = true; w.vx = 0; w.vy = 0; }
     if (w.y > this.waterY + 4) this.drown(w);
+  }
+
+  // ---------- Hilfsmittel: Seil, Rucksack, Fallschirm, Expander ----------
+  startUtility(w, wpn) {
+    switch (wpn.kind) {
+      case 'rope':
+        this.mv = { kind: 'rope', pts: null, len: 0, hook: null, shots: 0 };
+        return this.fireHook(w);
+      case 'jet':
+        this.mv = { kind: 'jet', fuel: wpn.fuel, th: false };
+        w.grounded = false; w.vy = Math.min(w.vy, -140);
+        this.fx({ k: 'sfx', s: 'jetOn' });
+        return true;
+      case 'chute':
+        this.mv = { kind: 'chute', open: false };
+        if (!w.grounded) this.openChute(w);
+        else this.ui.toast('Fallschirm bereit – öffnet sich im Fall.', '#4fc3f7');
+        return true;
+      case 'bungee':
+        this.mv = { kind: 'bungee', anchor: null };
+        if (!w.grounded) this.mv.anchor = { x: w.x, y: w.y - 2 };
+        this.fx({ k: 'sfx', s: 'clank' });
+        this.ui.toast('Expander eingehakt – ab über die Kante!', '#ef5350');
+        return true;
+    }
+    return false;
+  }
+
+  // Leertaste bei aktivem Hilfsmittel
+  utilityAction(w) {
+    const mv = this.mv;
+    if (mv.kind === 'rope') {
+      if (mv.pts) { mv.pts = null; this.fx({ k: 'sfx', s: 'release' }); return; }
+      if (mv.hook) return;
+      if (this.tp !== 'aim') return;
+      if (mv.shots >= ROPE_SHOTS) { this.ui.toast('Gurt ist ausgeleiert – erst landen.', '#ff8f00'); return; }
+      this.fireHook(w);
+    } else if (mv.kind === 'chute') {
+      if (mv.open) this.endUtility();
+      else if (!w.grounded) this.openChute(w);
+    } else {
+      this.endUtility();
+    }
+  }
+
+  endUtility() {
+    if (!this.mv) return;
+    if (this.mv.kind === 'jet') this.fx({ k: 'sfx', s: 'jetOff' });
+    if ((this.mv.kind === 'rope' && this.mv.pts) || (this.mv.kind === 'bungee' && this.mv.anchor)) this.fx({ k: 'sfx', s: 'release' });
+    this.mv = null;
+  }
+
+  openChute(w) {
+    this.mv.open = true;
+    this.fx({ k: 'sfx', s: 'chute' });
+    this.fx({ k: 'puff', x: r1(w.x), y: r1(w.y - 30), c: '#4fc3f7' });
+  }
+
+  fireHook(w) {
+    const mv = this.mv;
+    const dx = Math.cos(w.aim) * w.facing, dy = Math.sin(w.aim);
+    mv.hook = { x: w.x + dx * WORKER_R, y: w.y + dy * WORKER_R, dx, dy, dist: 0 };
+    mv.shots++;
+    this.fx({ k: 'sfx', s: 'rope' });
+    this.fx({ k: 'anim', id: w.id, a: 'shoot' });
+    return true;
+  }
+
+  // Haken fliegt bis zur ersten Wand (oder bis das Seil zu Ende ist)
+  hookStep(w, dt) {
+    const h = this.mv.hook;
+    const steps = Math.ceil((ROPE_SPEED * dt) / 2);
+    for (let i = 0; i < steps; i++) {
+      h.x += h.dx * 2; h.y += h.dy * 2; h.dist += 2;
+      if (this.terrain.solid(h.x, h.y)) {
+        // Ein Stück zurück, damit der Ankerpunkt frei liegt
+        let ax = h.x, ay = h.y;
+        for (let j = 0; j < 4 && this.terrain.solid(ax, ay); j++) { ax -= h.dx; ay -= h.dy; }
+        const len = Math.hypot(w.x - ax, w.y - ay);
+        this.mv.pts = [{ x: ax, y: ay, side: 0 }];
+        this.mv.len = Math.max(ROPE_MIN, Math.min(ROPE_MAX, len));
+        this.mv.hook = null;
+        w.grounded = false;
+        this.fx({ k: 'sfx', s: 'clank' });
+        return;
+      }
+      if (h.dist > ROPE_MAX || h.x < -20 || h.x > W + 20 || h.y < -200 || h.y > this.waterY) {
+        this.mv.hook = null;
+        this.fx({ k: 'sfx', s: 'release' });
+        return;
+      }
+    }
+  }
+
+  // Erster Geländepunkt auf der Strecke a -> b (ohne die Endpunkte)
+  segmentHit(ax, ay, bx, by) {
+    const d = Math.hypot(bx - ax, by - ay);
+    if (d < 8) return null;
+    const ux = (bx - ax) / d, uy = (by - ay) / d;
+    for (let t = 4; t < d - 4; t += 2) {
+      const x = ax + ux * t, y = ay + uy * t;
+      if (this.terrain.solid(x, y)) return { x, y, t, ux, uy };
+    }
+    return null;
+  }
+
+  ropeWrap(w) {
+    const mv = this.mv;
+    const P = mv.pts[mv.pts.length - 1];
+    // Abwickeln: Seil liegt nicht mehr an der Kante an
+    if (mv.pts.length > 1) {
+      const A = mv.pts[mv.pts.length - 2];
+      const c = (P.x - A.x) * (w.y - P.y) - (P.y - A.y) * (w.x - P.x);
+      if (c * P.side < 0) {
+        mv.pts.pop();
+        mv.len = Math.min(ROPE_MAX, mv.len + Math.hypot(P.x - A.x, P.y - A.y));
+        return;
+      }
+    }
+    // Aufwickeln: Gelände zwischen Arbeiter und Ankerpunkt -> neuer Knickpunkt
+    if (mv.pts.length >= 12) return;
+    const hit = this.segmentHit(P.x, P.y, w.x, w.y);
+    if (!hit) return;
+    // Knickpunkt kurz vor dem Hindernis, leicht aus dem Gelände heraus
+    let kx = hit.x - hit.ux * 2, ky = hit.y - hit.uy * 2;
+    const n = this.terrain.normalAt(hit.x, hit.y, 2);
+    for (let i = 0; i < 6 && this.terrain.solid(kx, ky); i++) { kx += n.x; ky += n.y; }
+    if (this.terrain.solid(kx, ky)) return;
+    const seg = Math.hypot(kx - P.x, ky - P.y);
+    if (seg < 3 || seg >= mv.len) return;
+    const c = (kx - P.x) * (w.y - ky) - (ky - P.y) * (w.x - kx);
+    mv.pts.push({ x: kx, y: ky, side: c >= 0 ? 1 : -1 });
+    mv.len -= seg;
+  }
+
+  utilityPhysics(w, dt) {
+    const mv = this.mv;
+    const k = this.ai ? this.ai.keys : this.keys;
+    const left = k.has('ArrowLeft') || k.has('KeyA');
+    const right = k.has('ArrowRight') || k.has('KeyD');
+    const up = k.has('ArrowUp') || k.has('KeyW');
+    const input = this.tp === 'aim' || this.tp === 'retreat';
+    const dir = input && left !== right ? (left ? -1 : 1) : 0;
+    switch (mv.kind) {
+      case 'rope': {
+        if (mv.hook) this.hookStep(w, dt);
+        if (!mv.pts) {
+          this.physicsWorker(w, dt);
+          if (w.grounded && !mv.hook) this.mv = null; // gelandet: Seil wieder eingerollt
+          return;
+        }
+        this.physicsWorker(w, dt, {
+          safe: true, float: true, bounce: 0.25,
+          force: (o, h) => {
+            // Schwingen: seitlicher Schub
+            if (dir) o.vx += dir * 420 * h;
+            const sp = Math.hypot(o.vx, o.vy);
+            if (sp > 950) { o.vx *= 950 / sp; o.vy *= 950 / sp; }
+          },
+          post: (o) => {
+            this.ropeWrap(o);
+            const P = mv.pts[mv.pts.length - 1];
+            const dx = o.x - P.x, dy = o.y - P.y, d = Math.hypot(dx, dy);
+            if (d > mv.len && d > 0.01) {
+              const ux = dx / d, uy = dy / d;
+              const nx = P.x + ux * mv.len, ny = P.y + uy * mv.len;
+              if (!this.terrain.hitsCircle(nx, ny, WORKER_R)) { o.x = nx; o.y = ny; }
+              const vr = o.vx * ux + o.vy * uy;
+              if (vr > 0) { o.vx -= vr * ux; o.vy -= vr * uy; }
+            }
+          },
+        });
+        break;
+      }
+      case 'jet': {
+        const thrust = input && up && mv.fuel > 0;
+        mv.th = thrust || (dir !== 0 && !w.grounded);
+        if (thrust) w.grounded = false;
+        this.physicsWorker(w, dt, {
+          safe: true,
+          force: (o, h) => {
+            if (thrust) { o.vy -= 1180 * h; mv.fuel -= h; }
+            if (dir && !o.grounded) { o.vx += dir * 520 * h; mv.fuel -= h * 0.4; }
+            o.vx *= 1 - 0.9 * h;
+            o.vy = Math.max(-320, Math.min(520, o.vy));
+            o.vx = Math.max(-280, Math.min(280, o.vx));
+          },
+        });
+        if (mv.fuel <= 0) { this.endUtility(); this.ui.toast('Druckluft leer!', '#90caf9'); }
+        break;
+      }
+      case 'chute': {
+        if (!mv.open && !w.grounded && w.vy > 160) this.openChute(w);
+        const wind = this.turn?.wind || 0;
+        this.physicsWorker(w, dt, mv.open ? {
+          safe: true,
+          force: (o, h) => {
+            if (o.vy > 70) o.vy += (70 - o.vy) * Math.min(1, h * 6);
+            const tvx = wind * 110 + dir * 70;
+            o.vx += (tvx - o.vx) * Math.min(1, h * 2);
+          },
+        } : null);
+        if (mv.open && w.grounded) this.mv = null;
+        break;
+      }
+      case 'bungee': {
+        if (!mv.anchor && !w.grounded) mv.anchor = { x: w.x, y: w.y - 2 };
+        this.physicsWorker(w, dt, mv.anchor ? {
+          safe: true, float: true,
+          force: (o, h) => {
+            const dx = o.x - mv.anchor.x, dy = o.y - mv.anchor.y, d = Math.hypot(dx, dy);
+            if (d > BUNGEE_REST) {
+              const f = BUNGEE_K * (d - BUNGEE_REST) * h;
+              o.vx -= (dx / d) * f; o.vy -= (dy / d) * f;
+              mv.taut = true;
+            } else if (mv.taut && d < BUNGEE_REST * 0.7) mv.taut = false;
+            o.vx *= 1 - 0.7 * h; o.vy *= 1 - 0.7 * h;
+            if (dir) o.vx += dir * 200 * h;
+          },
+        } : null);
+        // Wieder auf festem Boden (z.B. zurück auf die Kante geschnellt) -> abhaken
+        if (mv.anchor && this.isGrounded(w, WORKER_R) && Math.hypot(w.vx, w.vy) < 40) { w.grounded = true; w.vx = 0; w.vy = 0; this.mv = null; }
+        break;
+      }
+    }
+  }
+
+  // ---------- Dauerfeuer & Bohrhammer ----------
+  burstStep(w, dt) {
+    const b = this.burst;
+    b.t -= dt;
+    if (b.t > 0) return;
+    b.t = 0.075;
+    const wpn = WEAPON_BY_ID.tacker;
+    const a = w.aim + (Math.random() - 0.5) * 2 * wpn.spread;
+    const dir = { x: Math.cos(a) * w.facing, y: Math.sin(a) };
+    this.scan(w, w.x + dir.x * (WORKER_R + 7), w.y + dir.y * (WORKER_R + 7), dir, wpn, '#cfd8dc');
+    if (b.n % 3 === 0) this.fx({ k: 'anim', id: w.id, a: 'shoot' });
+    if (--b.n <= 0) this.burst = null;
+  }
+
+  drillStep(w, dt) {
+    const d = this.drill;
+    d.t -= dt;
+    w.vx = 0; w.vy = 0; w.grounded = true; w.walking = false;
+    const dir = d.dir;
+    const R = WEAPON_BY_ID.bohrer.radius;
+    // Vor dem Arbeiter Material abtragen
+    d.acc += dt;
+    if (d.acc >= 0.11) {
+      d.acc = 0;
+      this.sendOp({ k: 'boom', x: r1(w.x + dir.x * 8), y: r1(w.y + dir.y * 8), r: R }, false);
+      this.renderer.puff(w.x + dir.x * 14, w.y + dir.y * 14, '#b98b54');
+      this.fx({ k: 'sfx', s: 'drill' });
+      this.fx({ k: 'anim', id: w.id, a: 'drill' });
+    }
+    const nx = w.x + dir.x * 46 * dt, ny = w.y + dir.y * 46 * dt;
+    if (!this.terrain.hitsCircle(nx, ny, WORKER_R - 1)) { w.x = nx; w.y = ny; }
+    else if (dir.y < 0.7 && !this.terrain.hitsCircle(nx, ny - 2, WORKER_R - 1)) { w.x = nx; w.y = ny - 2; }
+    if (d.t <= 0 || w.y > this.waterY - 14 || w.x < 12 || w.x > W - 12) this.stopDrill();
+  }
+
+  stopDrill() {
+    this.drill = null;
+    const w = this.activeWorker();
+    if (w) w.grounded = false;
   }
 
   fallHurt(w, dmg) {
@@ -621,7 +964,16 @@ export class Game {
     const dir = { x: Math.cos(w.aim) * w.facing, y: Math.sin(w.aim) };
     const sx = w.x + dir.x * (WORKER_R + 7), sy = w.y + dir.y * (WORKER_R + 7);
     let endTurnNow = false;
+    let control = false;
     this.manualCam = false;
+
+    // Hilfsmittel: Zug läuft weiter
+    if (wpn.util) {
+      if (this.mv) return;
+      if (!this.startUtility(w, wpn)) return;
+      this.spendAmmo(wpn);
+      return;
+    }
 
     switch (wpn.kind) {
       case 'projectile': {
@@ -636,6 +988,63 @@ export class Game {
         this.projectiles.push({ type: wpn.id, wpn, x: sx, y: sy, vx: dir.x * sp, vy: dir.y * sp, r: 4, rot: 0, facing: w.facing, fuse: wpn.fuse, age: 0 });
         this.fx({ k: 'sfx', s: 'throw' });
         this.fx({ k: 'anim', id: w.id, a: 'throw' });
+        break;
+      }
+      case 'homing': {
+        if (!this.homeTarget) return;
+        const sp = 150 + power * 750;
+        this.projectiles.push({ type: 'sendung', wpn, x: sx, y: sy, vx: dir.x * sp, vy: dir.y * sp, r: 3, rot: 0, facing: 1, age: 0, target: { ...this.homeTarget } });
+        this.homeTarget = null;
+        this.fx({ k: 'sfx', s: 'shoot' });
+        this.fx({ k: 'sfx', s: 'beep' });
+        this.fx({ k: 'anim', id: w.id, a: 'shoot' });
+        break;
+      }
+      case 'burst': {
+        this.burst = { n: wpn.shots, t: 0 };
+        control = true;
+        break;
+      }
+      case 'drill': {
+        this.drill = { t: 3.5, acc: 1, dir };
+        control = true;
+        break;
+      }
+      case 'uppercut': {
+        let hit = false;
+        for (const o of this.workers) {
+          if (o === w || o.dead) continue;
+          const dx = o.x - w.x, dy = o.y - w.y;
+          if (dx * w.facing > -4 && Math.abs(dx) < 30 && dy < 16 && dy > -60) {
+            this.damage(o, wpn.damage);
+            o.vx = w.facing * 150; o.vy = -620; o.grounded = false;
+            hit = true;
+          }
+        }
+        w.vx = w.facing * 40; w.vy = -470; w.grounded = false;
+        this.fx({ k: 'anim', id: w.id, a: 'uppercut' });
+        this.fx({ k: 'sfx', s: 'swing' });
+        if (hit) {
+          this.fx({ k: 'sfx', s: 'stamp' });
+          this.fx({ k: 'float', x: r1(w.x + w.facing * 20), y: r1(w.y - 40), text: 'ABGESTEMPELT!', c: '#e53935' });
+        }
+        break;
+      }
+      case 'drone': {
+        const a = Math.atan2(dir.y, dir.x);
+        const p = { type: 'drohne', wpn, x: w.x, y: w.y - 18, vx: 0, vy: 0, r: 5, rot: a, heading: a, facing: 1, fuse: wpn.fuse, age: 0 };
+        this.projectiles.push(p);
+        this.walker = p;
+        control = true;
+        this.fx({ k: 'anim', id: w.id, a: 'radio' });
+        break;
+      }
+      case 'heavy': {
+        if (!target) return;
+        this.projectiles.push({ type: 'tresor', wpn, x: Math.max(20, Math.min(W - 20, target.x)), y: -80, vx: 0, vy: 380, r: 9, rot: 0, facing: 1, age: 0, hits: 0 });
+        this.fx({ k: 'msg', text: 'Achtung, Schwerlast von oben!', color: '#90a4ae' });
+        this.fx({ k: 'anim', id: w.id, a: 'radio' });
+        this.fx({ k: 'sfx', s: 'whistle' });
         break;
       }
       case 'hitscan': {
@@ -724,20 +1133,26 @@ export class Game {
       }
     }
 
-    if (!this.used.includes(wpn.id)) this.used.push(wpn.id);
-    const team = this.teams[this.turn.team];
-    if (team && team.ammo[wpn.id] > 0) team.ammo[wpn.id] -= 1;
-    this.ui.refreshWeapons();
+    this.spendAmmo(wpn);
 
     if (endTurnNow) {
       this.tp = 'resolve';
+    } else if (control) {
+      this.tp = 'control';
     } else {
       this.tp = 'retreat';
       this.retreatEnd = performance.now() + (this.rules.retreatTime ?? RETREAT_TIME) * 1000;
     }
   }
 
-  scan(w, sx, sy, dir, wpn) {
+  spendAmmo(wpn) {
+    if (!this.used.includes(wpn.id)) this.used.push(wpn.id);
+    const team = this.teams[this.turn.team];
+    if (team && team.ammo[wpn.id] > 0) team.ammo[wpn.id] -= 1;
+    this.ui.refreshWeapons();
+  }
+
+  scan(w, sx, sy, dir, wpn, color = null) {
     let x = sx, y = sy;
     let hitWorker = null;
     for (let i = 0; i < 500; i++) {
@@ -747,11 +1162,12 @@ export class Game {
       if (hitWorker) break;
       if (this.terrain.solid(x, y)) break;
     }
-    this.fx({ k: 'laser', x1: r1(sx), y1: r1(sy), x2: r1(x), y2: r1(y) });
+    this.fx({ k: 'laser', x1: r1(sx), y1: r1(sy), x2: r1(x), y2: r1(y), ...(color ? { c: color } : {}) });
     if (hitWorker) {
       this.damage(hitWorker, wpn.damage);
-      hitWorker.vx += dir.x * 160; hitWorker.vy += dir.y * 160 - 80; hitWorker.grounded = false;
-      this.fx({ k: 'sfx', s: 'beep' });
+      const push = wpn.push ?? 160;
+      hitWorker.vx += dir.x * push; hitWorker.vy += dir.y * push - push / 2; hitWorker.grounded = false;
+      if (!color) this.fx({ k: 'sfx', s: 'beep' });
     } else if (this.terrain.solid(x, y)) {
       this.sendOp({ k: 'boom', x: r1(x), y: r1(y), r: wpn.radius }, false);
       this.renderer.puff(x, y, '#b98b54');
@@ -778,7 +1194,7 @@ export class Game {
     }
     // Andere Projektile (z.B. Gasflaschen) wegschubsen
     for (const p of this.projectiles) {
-      if (p.dead || p.type === 'palette' || p.type === 'paket') continue;
+      if (p.dead || ['palette', 'paket', 'sendung', 'tresor', 'drohne'].includes(p.type)) continue;
       const d = Math.hypot(p.x - x, p.y - y);
       if (d < R && d > 0.5) {
         p.vx += ((p.x - x) / d) * 300; p.vy += ((p.y - y) / d) * 300 - 100; p.grounded = false;
@@ -794,12 +1210,17 @@ export class Game {
       this.explode(p.x, p.y, 22, 18);
       return;
     }
+    if (p.type === 'retoure2') {
+      this.explode(p.x, p.y, 36, 28);
+      return;
+    }
     this.explode(p.x, p.y, wpn.radius, wpn.damage);
     if (wpn.cluster) {
+      const big = wpn.clusterType === 'retoure2';
       for (let i = 0; i < wpn.cluster; i++) {
-        const a = -Math.PI / 2 + (i - (wpn.cluster - 1) / 2) * 0.45;
-        const sp = 220 + Math.random() * 120;
-        this.projectiles.push({ type: 'frag', wpn, x: p.x, y: p.y - 6, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, r: 2, rot: 0, facing: 1, age: 0 });
+        const a = -Math.PI / 2 + (i - (wpn.cluster - 1) / 2) * (big ? 0.38 : 0.45);
+        const sp = big ? 280 + Math.random() * 160 : 220 + Math.random() * 120;
+        this.projectiles.push({ type: big ? 'retoure2' : 'frag', wpn, x: p.x, y: p.y - 6, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, r: big ? 3 : 2, rot: 0, facing: 1, age: 0 });
       }
     }
   }
@@ -814,8 +1235,73 @@ export class Game {
     p.age += dt;
     const wind = this.turn?.wind || 0;
     switch (p.type) {
+      case 'sendung': {
+        // Erst normal fliegen, dann den Empfänger anpeilen
+        const homing = p.age > 0.35 && p.age < 3.5;
+        if (homing) {
+          const want = Math.atan2(p.target.y - p.y, p.target.x - p.x);
+          const cur = Math.atan2(p.vy, p.vx);
+          let da = want - cur;
+          while (da > Math.PI) da -= Math.PI * 2;
+          while (da < -Math.PI) da += Math.PI * 2;
+          const turn = Math.max(-1, Math.min(1, da)) * 5 * dt;
+          const sp = Math.min(620, Math.max(380, Math.hypot(p.vx, p.vy)) + 300 * dt);
+          p.vx = Math.cos(cur + turn) * sp; p.vy = Math.sin(cur + turn) * sp;
+          if (!p.locked) { p.locked = true; this.fx({ k: 'sfx', s: 'beep' }); }
+        } else {
+          p.vy += GRAVITY * dt;
+          p.vx += wind * WIND_ACC * dt * 0.5;
+        }
+        const steps = Math.max(1, Math.ceil((Math.hypot(p.vx, p.vy) * dt) / 2));
+        for (let i = 0; i < steps; i++) {
+          p.x += (p.vx * dt) / steps;
+          p.y += (p.vy * dt) / steps;
+          if (this.terrain.solid(p.x, p.y) || this.hitsWorker(p)) { this.explodeProjectile(p); break; }
+        }
+        p.rot = Math.atan2(p.vy, p.vx);
+        break;
+      }
+      case 'drohne': {
+        this.fuseTick(p, dt);
+        if (p.fuse <= 0) { this.explodeProjectile(p); break; }
+        if (p.age < 0.4) {
+          // Abheben: erst senkrecht hoch, damit die Drohne nicht am eigenen Arbeiter zerschellt
+          if (!this.terrain.hitsCircle(p.x, p.y - 2, p.r)) p.y -= 140 * dt;
+          p.rot = p.heading;
+          break;
+        }
+        const sp = 240;
+        p.vx = Math.cos(p.heading) * sp; p.vy = Math.sin(p.heading) * sp;
+        const steps = Math.max(1, Math.ceil((sp * dt) / 2));
+        for (let i = 0; i < steps; i++) {
+          p.x += (p.vx * dt) / steps;
+          p.y += (p.vy * dt) / steps;
+          if (this.terrain.hitsCircle(p.x, p.y, p.r) || (p.age > 0.4 && this.hitsWorker(p, 2))) { this.explodeProjectile(p); break; }
+        }
+        if (p.y < -500) p.heading = Math.PI / 2; // nicht aus der Halle fliegen
+        p.rot = p.heading;
+        break;
+      }
+      case 'tresor': {
+        p.vy = Math.min(700, p.vy + GRAVITY * dt);
+        const steps = Math.max(1, Math.ceil((p.vy * dt) / 2));
+        for (let i = 0; i < steps; i++) {
+          p.y += (p.vy * dt) / steps;
+          if (p.y > 0 && (this.terrain.hitsCircle(p.x, p.y, p.r) || this.hitsWorker(p))) {
+            p.hits++;
+            this.explode(p.x, p.y + 4, p.wpn.radius, p.wpn.damage);
+            this.fx({ k: 'sfx', s: 'clang' });
+            p.vy = 160;
+            if (p.hits >= p.wpn.hits) p.dead = true;
+            break;
+          }
+        }
+        p.rot = Math.sin(p.age * 2) * 0.08;
+        break;
+      }
       case 'paket':
       case 'palette':
+      case 'retoure2':
       case 'frag': {
         p.vy += GRAVITY * dt;
         if (p.type === 'paket' || p.type === 'palette') p.vx += wind * WIND_ACC * dt;
@@ -825,11 +1311,13 @@ export class Game {
           p.y += (p.vy * dt) / steps;
           if (this.terrain.solid(p.x, p.y) || this.hitsWorker(p)) { this.explodeProjectile(p); break; }
         }
-        p.rot = p.type === 'palette' ? Math.sin(p.age * 3) * 0.2 : Math.atan2(p.vy, p.vx);
+        p.rot = p.type === 'palette' ? Math.sin(p.age * 3) * 0.2 : p.type === 'retoure2' ? p.rot + dt * 8 : Math.atan2(p.vy, p.vx);
         break;
       }
       case 'folie':
       case 'kiste':
+      case 'retoure':
+      case 'fass':
       case 'gas': {
         p.vy += GRAVITY * dt;
         const res = this.moveCircle(p, dt, p.r, p.wpn.bounce ?? 0.25);
@@ -881,6 +1369,7 @@ export class Game {
     const before = Math.ceil(p.fuse);
     p.fuse -= dt;
     if (Math.ceil(p.fuse) !== before && p.fuse > 0) this.fx({ k: 'sfx', s: 'fuse' });
+    if (p.type === 'fass' && !p.sang && p.fuse < 0.9) { p.sang = true; this.fx({ k: 'sfx', s: 'choir' }); }
   }
 
   // ---------- Netzwerk ----------
@@ -893,10 +1382,29 @@ export class Game {
       p: this.projectiles.filter((p) => !p.dead).map((p) => [PROJECTILE_TYPES.indexOf(p.type), r1(p.x), r1(p.y), Math.round(p.rot * 100) / 100, p.facing, p.fuse != null ? r1(p.fuse) : null]),
       wp: this.weapon,
       ch: Math.round(this.charge * 100) / 100,
-      am: this.tp === 'aim' && w && !w.dead ? 1 : 0,
+      am: (this.tp === 'aim' || this.burst) && w && !w.dead ? 1 : 0,
       rt: Math.round(this.retreatLeft() * 10) / 10,
       tl: Math.round(this.timeLeft() * 10) / 10,
+      mv: this.gearState(),
     });
+  }
+
+  // Hilfsmittel kompakt für Darstellung & Snapshot: {k, on, p:[x,y,...]} (p: Anker → Knickpunkte bzw. Haken)
+  gearState() {
+    const mv = this.mv;
+    if (this.drill) return { k: 'drill', on: 1 };
+    if (!mv) return 0;
+    const flat = (pts) => pts.flatMap((q) => [r1(q.x), r1(q.y)]);
+    switch (mv.kind) {
+      case 'rope':
+        if (mv.pts) return { k: 'rope', on: 1, p: flat(mv.pts) };
+        if (mv.hook) return { k: 'rope', on: 0, p: flat([mv.hook]) };
+        return 0;
+      case 'jet': return { k: 'jet', on: mv.th ? 1 : 0, f: Math.round(mv.fuel * 10) / 10 };
+      case 'chute': return mv.open ? { k: 'chute', on: 1 } : 0;
+      case 'bungee': return mv.anchor ? { k: 'bungee', on: mv.taut ? 1 : 0, p: flat([mv.anchor]) } : 0;
+    }
+    return 0;
   }
 
   endTurn() {
@@ -907,7 +1415,7 @@ export class Game {
       t: 'turnEnd',
       n: this.turnN,
       workers: this.workers.map((w) => ({ id: w.id, x: r1(w.x), y: r1(w.y), hp: w.hp, dead: w.dead })),
-      used: this.used,
+      used: this.used.filter((id) => WEAPON_BY_ID[id]?.ammo > 0),
     });
   }
 
@@ -927,21 +1435,33 @@ export class Game {
     const active = this.activeWorker();
     const wpnId = this.sim ? this.weapon : this.remote.weapon;
     const wpn = WEAPON_BY_ID[wpnId] || WEAPON_BY_ID.paket;
-    const aiming = this.sim ? this.tp === 'aim' : this.remote.aiming;
+    const aiming = this.sim ? this.tp === 'aim' || !!this.burst : this.remote.aiming;
     const playing = this.state.phase === 'playing';
-    const held = playing && aiming ? { id: wpn.id, aimArm: ['projectile', 'grenade', 'hitscan'].includes(wpn.kind) } : null;
+    const gear = playing ? (this.sim ? this.gearState() : this.remote.mv) : 0;
+    let held = playing && aiming ? { id: wpn.id, aimArm: AIM_KINDS.includes(wpn.kind) } : null;
+    if (gear && active && gear.k !== 'drill') {
+      // Hand am Gurt (zeigt zum letzten Knickpunkt), am Fallschirm nach oben
+      let armAngle = gear.k === 'chute' ? Math.PI / 2 : 0.3;
+      if (gear.p?.length) {
+        const px = gear.p[gear.p.length - 2], py = gear.p[gear.p.length - 1];
+        armAngle = -Math.atan2(py - (active.ry ?? active.y), (px - (active.rx ?? active.x)) * (active.facing < 0 ? -1 : 1));
+      }
+      held = { id: gear.k === 'rope' ? 'seilhand' : 'empty', armAngle };
+    } else if (gear && gear.k === 'drill') held = { id: 'bohrer', aimArm: true };
     const charge = this.sim ? this.charge : this.remote.charge;
     this.renderer.syncWorkers(this.workers, this.teams, playing ? active?.id : -1, held, aiming ? charge : 0, dt);
     this.renderer.setProjectiles(this.projectiles.filter((p) => !p.dead), dt);
     this.renderer.syncGraves(this.graves, this.teams);
-    const showAim = !!active && !active.dead && aiming && !wpn.target && ['projectile', 'grenade', 'hitscan'].includes(wpn.kind);
+    const showAim = !!active && !active.dead && aiming && !(gear && gear.k === 'rope' && gear.on) && (!wpn.target || wpn.kind === 'homing') && AIM_KINDS.includes(wpn.kind);
+    this.renderer.showGear(active && !active.dead && gear ? { ...gear, x: active.rx ?? active.x, y: active.ry ?? active.y, facing: active.facing } : null, dt);
     if (active) {
       this.renderer.showAim({ x: active.rx ?? active.x, y: active.ry ?? active.y }, active.aim, active.facing, this.sim ? this.charge : this.remote.charge, showAim);
     } else {
       this.renderer.showAim(null, 0, 1, 0, false);
     }
     if (this.myTurn && this.tp === 'aim' && wpn.target) {
-      this.renderer.showTarget(wpn.kind === 'girder' ? 'girder' : 'point', this.mouse.x, this.mouse.y, this.girderAngle);
+      const t = wpn.kind === 'homing' && this.homeTarget ? this.homeTarget : this.mouse;
+      this.renderer.showTarget(wpn.kind === 'girder' ? 'girder' : 'point', t.x, t.y, this.girderAngle);
     } else {
       this.renderer.showTarget(null);
     }

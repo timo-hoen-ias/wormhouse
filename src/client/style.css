@@ -81,12 +81,15 @@ button:disabled { opacity: 0.4; cursor: default; }
 .windbar { position: relative; height: 10px; background: rgba(0,0,0,0.5); border-radius: 5px; margin-top: 4px; overflow: hidden; }
 .windbar::after { content: ''; position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: #fff8; }
 .windfill { position: absolute; top: 0; bottom: 0; background: linear-gradient(90deg, #4fc3f7, #b3e5fc); }
-#weapons { position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%); display: flex; gap: 6px; background: var(--panel); padding: 8px; border-radius: 12px; border: 1px solid var(--line); max-width: calc(100% - 20px); overflow-x: auto; }
-.wbtn { position: relative; width: 52px; height: 52px; font-size: 26px; padding: 0; display: flex; align-items: center; justify-content: center; flex: none; }
+#weapons { position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%); display: flex; gap: 8px; background: var(--panel); padding: 6px 8px; border-radius: 12px; border: 1px solid var(--line); max-width: calc(100% - 20px); overflow-x: auto; }
+.wgroup { display: flex; gap: 3px; padding: 0 0 0 8px; border-left: 1px solid var(--line); }
+.wgroup:first-child { border-left: 0; padding-left: 0; }
+.wbtn { position: relative; width: 42px; height: 46px; font-size: 22px; padding: 0; display: flex; align-items: center; justify-content: center; flex: none; }
+.wbtn.util { background: #1e2c3a; }
 .wbtn .key { position: absolute; top: 2px; left: 4px; font-size: 10px; color: var(--muted); }
 .wbtn .ammo { position: absolute; bottom: 2px; right: 4px; font-size: 11px; color: var(--hazard); }
 .wbtn.sel { outline: 3px solid var(--hazard); background: #3d3420; }
-#weaponinfo { position: absolute; bottom: 82px; left: 50%; transform: translateX(-50%); text-align: center; font-size: 13px; background: rgba(0,0,0,0.55); padding: 6px 14px; border-radius: 8px; max-width: 90%; }
+#weaponinfo { position: absolute; bottom: 76px; left: 50%; transform: translateX(-50%); text-align: center; font-size: 13px; background: rgba(0,0,0,0.55); padding: 6px 14px; border-radius: 8px; max-width: 90%; }
 #weaponinfo b { color: var(--hazard); }
 #toast { position: absolute; top: 90px; left: 50%; transform: translateX(-50%); font-size: 20px; font-weight: 800; text-shadow: 0 2px 4px #000; opacity: 0; transition: opacity 0.3s; pointer-events: none; text-align: center; }
 #toast.show { opacity: 1; }

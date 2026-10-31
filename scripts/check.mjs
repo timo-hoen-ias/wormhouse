@@ -1,6 +1,6 @@
 // Schneller Selbsttest ohne Browser: Level-Generator deterministisch? Spawns gültig? Waffen konsistent?
 import { generateTerrain, findSpawns, isFree } from '../src/shared/terrain-gen.js';
-import { WEAPONS, PROJECTILE_TYPES } from '../src/shared/weapons.js';
+import { WEAPONS, WEAPON_CATS, PROJECTILE_TYPES } from '../src/shared/weapons.js';
 import { WORKER_R, WATER_Y, GRAVITY } from '../src/shared/constants.js';
 import { fallDamage } from '../src/shared/fall.js';
 import { sanitizeRules, defaultRules, ammoFromRules, configurableWeapons, AMMO_PRESETS } from '../src/shared/rules.js';
@@ -18,8 +18,11 @@ for (const seed of [1, 42, 123456, 987654321]) {
   ok(spawns.every(([x, y]) => isFree(a, x, y, WORKER_R) && y < WATER_Y), `Seed ${seed}: 20 Startplätze frei und über Wasser`);
 }
 ok(new Set(WEAPONS.map((w) => w.id)).size === WEAPONS.length, 'Waffen-IDs eindeutig');
-ok(WEAPONS.length <= 11, 'Alle Waffen haben eine Taste (1–0, ß)');
-ok(['paket', 'folie', 'kiste', 'stapler', 'palette'].every((t) => PROJECTILE_TYPES.includes(t)), 'Projektiltypen vollständig');
+ok(WEAPON_CATS.flat().length === WEAPONS.length, 'Jede Waffe liegt in einem Fach (Tasten 1–0)');
+ok(WEAPON_CATS.every((c) => c.length > 0 && c.length <= 5), 'Kein Fach leer oder überfüllt');
+ok(['paket', 'folie', 'kiste', 'stapler', 'palette', 'sendung', 'retoure', 'retoure2', 'fass', 'drohne', 'tresor'].every((t) => PROJECTILE_TYPES.includes(t)), 'Projektiltypen vollständig');
+ok(PROJECTILE_TYPES.slice(0, 7).join() === 'paket,folie,kiste,frag,stapler,gas,palette', 'Alte Projektil-Kennungen unverändert');
+ok(WEAPONS.filter((w) => w.util).every((w) => ['rope', 'jet', 'chute', 'bungee'].includes(w.kind)), 'Hilfsmittel haben eine Bewegungsart');
 
 const fallFrom = (h) => fallDamage(Math.sqrt(2 * GRAVITY * h));
 ok(fallFrom(60) === 0 && fallFrom(150) === 0, 'Kleine Sprünge/Stürze (< 150 px) kosten nichts');

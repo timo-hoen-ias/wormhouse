@@ -45,31 +45,47 @@ Die KI (`src/client/ai.js`) läuft im Browser der Schichtleitung: Sie simuliert 
 
 | Taste | Aktion |
 |---|---|
-| ← → / A D | laufen |
-| ↑ ↓ / W S | zielen (bei der Kartonbrücke: drehen) |
-| Leertaste halten / loslassen | Kraft aufladen / werfen (Amok-Stapler: zünden) |
+| ← → / A D | laufen (am Seil: schwingen, mit Rucksack: seitlich) |
+| ↑ ↓ / W S | zielen (Kartonbrücke: drehen, am Seil: ein-/ausfahren, Rucksack: ↑ = Schub, Drohne: lenken) |
+| Leertaste halten / loslassen | Kraft aufladen / werfen (Stapler/Drohne: zünden, Seil: Haken schießen/loslassen) |
 | Enter | Sprung nach vorn |
 | ⌫ Backspace | Rückwärtssalto |
-| 1 – 0, ß | Waffe wählen (oder unten anklicken) |
-| Mausklick | Ziel für Paletten-Abwurf, Inventurfehler, Kartonbrücke |
+| 1 – 9, 0 | Waffenfach wählen, mehrfach drücken schaltet durch das Fach (oder unten anklicken) |
+| Mausklick | Ziel für Paletten-Abwurf, Panzerschrank, Sendungsverfolgung, Inventurfehler, Kartonbrücke |
 | Mausrad / Ziehen | Zoom / Kamera verschieben, **C** = Kamera zurück |
 | T | Chat |
 
 ### Das Arsenal
 
-| | Waffe | Funktion | Munition |
-|---|---|---|---|
-| 📦 | Paketkanone | Bazooka, windanfällig, explodiert beim Aufprall | ∞ |
-| 🌀 | Stretchfolien-Granate | springt, 3 s Zünder | ∞ |
-| 🔩 | Kleinteile-Kiste | Splittergranate mit 5 Schrauben | 2 |
-| 🔫 | Barcode-Scanner | 2 Laser-Scans, schnurgerade | ∞ |
-| 🛒 | Hubwagen-Rempler | Nahkampf, schubst weit weg | ∞ |
-| 🚜 | Amok-Stapler | fährt selbstständig, Leertaste zündet | 1 |
-| 🧯 | Propangasflasche | abstellen, wegrennen, 5 s | 1 |
-| 🪵 | Paletten-Abwurf | Luftschlag mit 5 Europaletten | 1 |
-| 📋 | Inventurfehler | Teleport | 2 |
-| 🧱 | Kartonbrücke | baut einen Träger aus Karton | 3 |
-| ☕ | Kaffeepause | Zug aussetzen | ∞ |
+| Fach | | Waffe | Funktion | Munition |
+|---|---|---|---|---|
+| 1 | 📦 | Paketkanone | Bazooka, windanfällig, explodiert beim Aufprall | ∞ |
+| 1 | 📡 | Sendungsverfolgung | Zielsuchrakete: Ziel anklicken, dann abfeuern | 2 |
+| 2 | 🌀 | Stretchfolien-Granate | springt, 3 s Zünder | ∞ |
+| 2 | 🔩 | Kleinteile-Kiste | Splittergranate mit 5 Schrauben | 2 |
+| 3 | 🎁 | Retouren-Lawine | „Bananenbombe“: platzt in 5 Pakete, die beim Aufprall explodieren | 1 |
+| 3 | ☢️ | Gefahrgut-Fass | riesige Explosion mit Halleluja | 1 |
+| 4 | 🔫 | Barcode-Scanner | 2 Laser-Scans, schnurgerade | ∞ |
+| 4 | 📎 | Elektrotacker | Dauerfeuer, 12 Klammern, nachzielen mit ↑/↓ | 2 |
+| 5 | 🛒 | Hubwagen-Rempler | Nahkampf, schubst weit weg | ∞ |
+| 5 | 🔨 | Stempel-Uppercut | Sprung-Schlag, schleudert Gegner nach oben | 2 |
+| 6 | 🚜 | Amok-Stapler | fährt selbstständig, Leertaste zündet | 1 |
+| 6 | 🛸 | Inventur-Drohne | ferngelenkt (←/→), Leertaste zündet, 8 s Akku | 1 |
+| 6 | 🧯 | Propangasflasche | abstellen, wegrennen, 5 s | 1 |
+| 7 | 🪵 | Paletten-Abwurf | Luftschlag mit 5 Europaletten | 1 |
+| 7 | 🗄️ | Panzerschrank | fällt senkrecht und schlägt sich mit 6 Explosionen durch alles | 1 |
+| 8 | ⛏️ | Bohrhammer | bohrt 3,5 s in Zielrichtung (auch senkrecht) | 2 |
+| 8 | 🧱 | Kartonbrücke | baut einen Träger aus Karton | 3 |
+| 9 | 🧗 | Spanngurt-Seil | Ninja-Seil (siehe unten) | ∞ |
+| 9 | 🎒 | Druckluft-Rucksack | Jetpack, 6 s Druckluft | 2 |
+| 9 | 🪂 | Planen-Fallschirm | öffnet im Fall, kein Fallschaden, treibt im Wind | 3 |
+| 9 | ➰ | Gummi-Expander | Bungee: von der Kante springen und federn | 2 |
+| 9 | 📋 | Inventurfehler | Teleport | 2 |
+| 0 | ☕ | Kaffeepause | Zug aussetzen | ∞ |
+
+**Hilfsmittel** (Seil, Rucksack, Fallschirm, Expander) beenden den Zug nicht: Danach darf noch geschossen werden – auch direkt vom Seil oder aus der Luft (Waffe wählen, Leertaste).
+
+**Spanngurt-Seil:** Leertaste schießt den Haken in Zielrichtung (max. 420 px). Hängt er, schwingt man mit ←/→ und fährt mit ↑/↓ ein und aus. Der Gurt wickelt sich um Kanten. Leertaste lässt los, der Schwung bleibt erhalten; in der Luft kann der Haken bis zu 5× neu geschossen werden.
 
 ### Fallschaden
 
