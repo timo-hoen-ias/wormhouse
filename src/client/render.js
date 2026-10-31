@@ -15,43 +15,173 @@ function mat(color, opts = {}) {
 // ---------- Modelle ----------
 function makeWorkerMesh(teamColor) {
   const g = new THREE.Group();
-  const body = new THREE.Group();
+  const body = new THREE.Group(); // gespiegelt je nach Blickrichtung
   g.add(body);
+  const pose = new THREE.Group(); // Squash, Kippen, Salto (Drehpunkt in Körpermitte)
+  body.add(pose);
   const pants = mat('#2b3a55');
-  const legL = new THREE.Mesh(new THREE.BoxGeometry(4, 7, 5), pants);
-  legL.position.set(-2.4, -5.5, 0);
-  const legR = legL.clone(); legR.position.x = 2.4;
   const boots = mat('#3b2a1a');
-  const bootL = new THREE.Mesh(new THREE.BoxGeometry(5, 2.5, 6), boots);
-  bootL.position.set(-2.4, -9, 0.5);
-  const bootR = bootL.clone(); bootR.position.x = 2.4;
-  const torso = new THREE.Mesh(new THREE.BoxGeometry(11, 10, 7), mat(teamColor, { emissive: teamColor, emissiveIntensity: 0.15 }));
+  // Beine an der Hüfte aufgehängt, damit sie beim Laufen richtig schwingen
+  const mkLeg = (x) => {
+    const hip = new THREE.Group();
+    hip.position.set(x, -2, 0);
+    const leg = new THREE.Mesh(new THREE.BoxGeometry(4, 7, 5), pants);
+    leg.position.y = -3.5;
+    const boot = new THREE.Mesh(new THREE.BoxGeometry(5, 2.5, 6), boots);
+    boot.position.set(0.5, -7, 0.5);
+    hip.add(leg, boot);
+    return hip;
+  };
+  const legL = mkLeg(-2.4);
+  const legR = mkLeg(2.4);
+  const torsoMat = mat(teamColor, { emissive: teamColor, emissiveIntensity: 0.15 });
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(11, 10, 7), torsoMat);
   torso.position.y = 2.5;
   const stripe = new THREE.Mesh(new THREE.BoxGeometry(11.2, 1.4, 7.2), mat('#e0e0e0', { emissive: '#ffffff', emissiveIntensity: 0.35 }));
   stripe.position.y = 1.5;
-  const head = new THREE.Mesh(new THREE.SphereGeometry(4.2, 16, 12), mat('#f1c27d'));
-  head.position.y = 11;
+  // Kopf als Gruppe (nicken, zurückwerfen beim Treffer)
+  const headG = new THREE.Group();
+  headG.position.y = 7.5;
+  const skin = mat('#f1c27d');
+  const head = new THREE.Mesh(new THREE.SphereGeometry(4.2, 16, 12), skin);
+  head.position.y = 3.5;
   const helmet = new THREE.Mesh(
     new THREE.SphereGeometry(4.8, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2),
     mat('#ffd400', { roughness: 0.35 }),
   );
-  helmet.position.y = 12;
+  helmet.position.y = 4.5;
   const brim = new THREE.Mesh(new THREE.CylinderGeometry(5.6, 5.6, 0.8, 16), mat('#ffd400', { roughness: 0.35 }));
-  brim.position.set(0.6, 12, 0);
+  brim.position.set(0.6, 4.5, 0);
+  const eyes = new THREE.Group();
+  eyes.position.set(3.4, 4, 0);
   const eye = new THREE.Mesh(new THREE.SphereGeometry(0.8, 6, 6), mat('#111'));
-  eye.position.set(3.4, 11.5, 1.6);
+  eye.position.z = 1.6;
   const eye2 = eye.clone(); eye2.position.z = -1.6;
-  // Arm mit Werkzeug – dreht sich mit dem Zielwinkel
+  eyes.add(eye, eye2);
+  const mouth = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.6, 2.2), mat('#5d2a1a'));
+  mouth.position.set(3.9, 2, 0);
+  headG.add(head, helmet, brim, eyes, mouth);
+  // Schwindel-Sternchen nach harter Landung
+  const stars = new THREE.Group();
+  stars.position.y = 10;
+  const starMat = new THREE.MeshBasicMaterial({ color: '#ffeb3b' });
+  for (let i = 0; i < 3; i++) {
+    const st = new THREE.Mesh(new THREE.OctahedronGeometry(1.4), starMat);
+    const a = (i / 3) * Math.PI * 2;
+    st.position.set(Math.cos(a) * 6, 0, Math.sin(a) * 6);
+    stars.add(st);
+  }
+  stars.visible = false;
+  headG.add(stars);
+  // Vorderer Arm mit Werkzeug – dreht sich mit dem Zielwinkel
   const arm = new THREE.Group();
   arm.position.set(1, 4, 4);
   const sleeve = new THREE.Mesh(new THREE.BoxGeometry(8, 2.6, 2.6), mat(teamColor));
   sleeve.position.x = 4;
+  const hand = new THREE.Mesh(new THREE.SphereGeometry(1.5, 8, 6), skin);
+  hand.position.x = 8.2;
+  const holder = new THREE.Group(); // hier hängt der gehaltene Gegenstand
+  holder.position.x = 9;
   const tool = new THREE.Mesh(new THREE.BoxGeometry(5, 3, 3), mat('#333'));
-  tool.position.x = 9;
-  arm.add(sleeve, tool);
-  body.add(legL, legR, bootL, bootR, torso, stripe, head, helmet, brim, eye, eye2, arm);
+  holder.add(tool);
+  arm.add(sleeve, hand, holder);
+  // Hinterer Arm: schwingt beim Laufen, rudert in der Luft
+  const armB = new THREE.Group();
+  armB.position.set(-1, 6, -4);
+  const sleeveB = new THREE.Mesh(new THREE.BoxGeometry(2.6, 8, 2.6), mat(teamColor));
+  sleeveB.position.y = -4;
+  const handB = new THREE.Mesh(new THREE.SphereGeometry(1.4, 8, 6), skin);
+  handB.position.y = -8;
+  armB.add(sleeveB, handB);
+  pose.add(legL, legR, torso, stripe, headG, arm, armB);
   body.traverse((o) => { if (o.isMesh) o.castShadow = true; });
-  g.userData = { body, arm, legL, legR };
+  g.userData = {
+    body, pose, arm, armB, legL, legR, headG, eyes, stars, holder, tool, torsoMat, heldId: null,
+    st: { squash: 0, hurt: 0, act: null, actT: 0, dizzy: 0, blink: 2 + Math.random() * 3, phase: Math.random() * 6, lastY: null, vy: 0, flip: 0 },
+  };
+  return g;
+}
+
+// Gegenstand in der Hand, passend zur gewählten Waffe
+function makeHeldMesh(id) {
+  const g = new THREE.Group();
+  const add = (geo, m, x = 0, y = 0, z = 0) => { const o = new THREE.Mesh(geo, m); o.position.set(x, y, z); g.add(o); return o; };
+  switch (id) {
+    case 'paket': { // Druckluftrohr mit Paket
+      const tube = add(new THREE.CylinderGeometry(2.2, 2.6, 12, 12), mat('#607d8b', { metalness: 0.6, roughness: 0.4 }), 3);
+      tube.rotation.z = Math.PI / 2;
+      add(new THREE.BoxGeometry(4, 4, 4), mat('#b98b54'), 9.5);
+      break;
+    }
+    case 'folie':
+      add(new THREE.CylinderGeometry(2.8, 2.8, 7, 12), new THREE.MeshPhysicalMaterial({ color: '#cfe8ff', transparent: true, opacity: 0.8, roughness: 0.1 }), 1);
+      break;
+    case 'kiste': add(new THREE.BoxGeometry(6, 4.5, 5), mat('#1565c0'), 1.5); break;
+    case 'scanner': {
+      add(new THREE.BoxGeometry(7, 3, 2.5), mat('#212121'), 2);
+      add(new THREE.BoxGeometry(2, 5, 2), mat('#212121'), 0, -2.5);
+      add(new THREE.BoxGeometry(0.6, 2, 2.2), new THREE.MeshBasicMaterial({ color: '#ff1744' }), 5.6);
+      break;
+    }
+    case 'hubwagen': {
+      add(new THREE.BoxGeometry(10, 1.2, 1.2), mat('#c62828'), 4);
+      add(new THREE.BoxGeometry(1.2, 5, 1.2), mat('#212121'), 0);
+      break;
+    }
+    case 'stapler': { // Fernbedienung
+      add(new THREE.BoxGeometry(4, 5, 2), mat('#f9a825'), 1);
+      add(new THREE.CylinderGeometry(0.3, 0.3, 6, 6), mat('#424242'), 1, 5);
+      add(new THREE.SphereGeometry(0.8, 6, 6), new THREE.MeshBasicMaterial({ color: '#ff1744' }), 1, 8);
+      break;
+    }
+    case 'gas': {
+      add(new THREE.CylinderGeometry(2.4, 2.4, 8, 10), mat('#c62828', { metalness: 0.4 }), 1);
+      add(new THREE.CylinderGeometry(0.9, 0.9, 2.5, 6), mat('#9e9e9e', { metalness: 0.8 }), 1, 5);
+      break;
+    }
+    case 'palette': { // Funkgerät zum Kranführer
+      add(new THREE.BoxGeometry(3, 6, 2), mat('#263238'), 0.5, 1);
+      add(new THREE.CylinderGeometry(0.4, 0.4, 5, 6), mat('#111'), 1.5, 6);
+      break;
+    }
+    case 'inventur': { // Klemmbrett
+      add(new THREE.BoxGeometry(6, 8, 0.6), mat('#8d6e63'), 2, 1);
+      add(new THREE.BoxGeometry(5, 6.5, 0.7), mat('#fafafa'), 2, 0.6);
+      break;
+    }
+    case 'karton': {
+      add(new THREE.BoxGeometry(8, 6, 1), mat('#c99a62'), 3);
+      add(new THREE.TorusGeometry(1.6, 0.7, 6, 12), mat('#e6d3a3'), 3, 0, 1.2);
+      break;
+    }
+    case 'pause': { // Kaffeebecher
+      add(new THREE.CylinderGeometry(1.8, 1.5, 4, 12), mat('#fafafa'), 1, 1);
+      add(new THREE.CylinderGeometry(1.6, 1.6, 0.3, 12), mat('#4e342e'), 1, 3);
+      const handle = add(new THREE.TorusGeometry(1, 0.35, 6, 10), mat('#fafafa'), -1, 1);
+      handle.rotation.y = Math.PI / 2;
+      break;
+    }
+    default: add(new THREE.BoxGeometry(5, 3, 3), mat('#333'));
+  }
+  g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+  return g;
+}
+
+// Kündigungs-Karton als Grabstein
+function makeGraveMesh(teamColor) {
+  const g = new THREE.Group();
+  const box = new THREE.Mesh(new THREE.BoxGeometry(12, 13, 9), mat('#a77b47'));
+  box.position.y = 6.5;
+  const tape = new THREE.Mesh(new THREE.BoxGeometry(12.2, 2, 9.2), mat(teamColor));
+  tape.position.y = 9;
+  const red = mat('#d32f2f', { emissive: '#d32f2f', emissiveIntensity: 0.3 });
+  const x1 = new THREE.Mesh(new THREE.BoxGeometry(9, 1.4, 0.4), red);
+  x1.position.set(0, 4.5, 4.7); x1.rotation.z = 0.6;
+  const x2 = x1.clone(); x2.rotation.z = -0.6;
+  const flap = new THREE.Mesh(new THREE.BoxGeometry(6, 0.8, 9), mat('#8d6a3f'));
+  flap.position.set(-4, 13.5, 0); flap.rotation.z = 0.5;
+  g.add(box, tape, x1, x2, flap);
+  g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
   return g;
 }
 
@@ -83,6 +213,12 @@ function makeProjectileMesh(type) {
     wheel.rotation.x = Math.PI / 2; wheel.position.set(-6, -4, 0);
     const wheel2 = wheel.clone(); wheel2.position.x = 4;
     g.add(cab, mast, fork, wheel, wheel2);
+    g.userData.wheels = [wheel, wheel2];
+    g.userData.fork = fork;
+    const beacon = new THREE.Mesh(new THREE.SphereGeometry(1.5, 8, 6), new THREE.MeshBasicMaterial({ color: '#ff9100' }));
+    beacon.position.set(-3, 13.5, 0);
+    g.add(beacon);
+    g.userData.beacon = beacon;
   } else if (type === 'gas') {
     g.add(new THREE.Mesh(new THREE.CylinderGeometry(4.5, 4.5, 13, 14), mat('#c62828', { metalness: 0.4, roughness: 0.4 })));
     const valve = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 1.5, 4, 8), mat('#9e9e9e', { metalness: 0.8 }));
@@ -161,6 +297,7 @@ export class Renderer {
     this.scene.add(this.girderGhost);
     // Laser
     this.lasers = [];
+    this.rings = [];
 
     this.shake = 0;
     this.time = 0;
@@ -316,7 +453,8 @@ export class Renderer {
   }
 
   // ---------- Arbeiter ----------
-  syncWorkers(workers, teams, activeId) {
+  // held: { id, aimArm } – Gegenstand in der Hand des aktiven Arbeiters
+  syncWorkers(workers, teams, activeId, held = null, charge = 0, dt = 1 / 60) {
     const seen = new Set();
     for (const w of workers) {
       seen.add(w.id);
@@ -336,18 +474,13 @@ export class Renderer {
       mesh.visible = !w.dead && w.x != null;
       el.style.display = mesh.visible ? '' : 'none';
       if (!mesh.visible) continue;
-      mesh.position.set(tx(w.rx ?? w.x), ty(w.ry ?? w.y) - 1, 6);
-      const ud = mesh.userData;
-      ud.body.scale.x = w.facing < 0 ? -1 : 1;
-      ud.arm.rotation.z = -(w.aim || 0);
-      // Laufanimation
-      const walk = w.walking ? Math.sin(this.time * 18) : 0;
-      ud.legL.rotation.z = walk * 0.5;
-      ud.legR.rotation.z = -walk * 0.5;
-      ud.body.rotation.z = w.grounded === false ? Math.sin(this.time * 10) * 0.2 : 0;
+      const ry = w.ry ?? w.y;
+      mesh.position.set(tx(w.rx ?? w.x), ty(ry) - 1, 6);
+      const isActive = w.id === activeId;
+      this.animateWorker(mesh, w, ry, isActive ? held : null, isActive ? charge : 0, dt);
       el.querySelector('.n').textContent = w.name;
       el.querySelector('.hp').textContent = Math.max(0, Math.round(w.hp));
-      el.classList.toggle('active', w.id === activeId);
+      el.classList.toggle('active', isActive);
       el.dataset.x = mesh.position.x;
       el.dataset.y = mesh.position.y + 22;
     }
@@ -361,6 +494,156 @@ export class Renderer {
     }
   }
 
+  animateWorker(mesh, w, ry, held, charge, dt) {
+    const ud = mesh.userData;
+    const st = ud.st;
+    const t = this.time + st.phase;
+    // Vertikalgeschwindigkeit aus der Darstellung (funktioniert auch bei Zuschauern)
+    if (st.lastY != null && dt > 0) st.vy += ((ry - st.lastY) / dt - st.vy) * Math.min(1, dt * 12);
+    st.lastY = ry;
+    const air = w.grounded === false;
+    const facing = w.facing < 0 ? -1 : 1;
+
+    // Gegenstand in der Hand
+    const heldId = held?.id || null;
+    if (ud.heldId !== heldId) {
+      ud.holder.clear();
+      ud.holder.add(heldId ? makeHeldMesh(heldId) : ud.tool);
+      ud.heldId = heldId;
+    }
+
+    // Abklingende Zustände
+    st.squash = Math.max(0, st.squash - dt * 4);
+    st.hurt = Math.max(0, st.hurt - dt * 2.5);
+    st.dizzy = Math.max(0, st.dizzy - dt);
+    if (st.act) { st.actT += dt; }
+    const actDur = { shoot: 0.3, throw: 0.4, swing: 0.45, drop: 0.5, tele: 0.5, build: 0.6, coffee: 1.8, radio: 1.2, flip: 0.7 }[st.act] || 0;
+    if (st.act && st.actT > actDur) st.act = null;
+    const ak = st.act ? st.actT / actDur : 0; // 0..1 Fortschritt der Aktion
+
+    // Grundpose
+    let poseRot = 0, poseX = 0, poseY = 0, sx = 1, sy = 1;
+    let legL = 0, legR = 0, armB = 0.25, headRot = 0;
+    let armRot = held?.aimArm ? -(w.aim || 0) : (held ? -0.9 : -(w.aim || 0) * 0.3 - 0.6);
+    let armX = 1;
+
+    if (air) {
+      // Fliegen/Fallen: Beine spreizen, Arm rudert, beim Fallen hektischer
+      const falling = st.vy < -60;
+      legL = falling ? 0.6 + Math.sin(t * 22) * 0.3 : 0.5;
+      legR = falling ? -0.5 - Math.sin(t * 22) * 0.3 : -0.2;
+      armB = 2.6 + Math.sin(t * (falling ? 24 : 12)) * 0.6;
+      poseRot = falling ? Math.sin(t * 9) * 0.18 : 0.08;
+      headRot = falling ? 0.25 : 0;
+    } else if (w.walking) {
+      const ph = this.time * 18 + st.phase;
+      const s1 = Math.sin(ph);
+      legL = s1 * 0.6; legR = -s1 * 0.6;
+      armB = -s1 * 0.5 + 0.1;
+      poseY = Math.abs(Math.cos(ph)) * 1.2;
+      poseRot = -0.06;
+    } else {
+      // Stehen: atmen, ab und zu umschauen
+      sy = 1 + Math.sin(t * 2.4) * 0.02;
+      headRot = Math.sin(t * 0.7) > 0.93 ? 0.15 : Math.sin(t * 0.5) * 0.04;
+      armB = 0.15 + Math.sin(t * 2.4) * 0.04;
+    }
+
+    // Aufladen: zittern, Arm zurückziehen
+    if (charge > 0) {
+      poseX += (Math.random() - 0.5) * charge * 1.4;
+      armX = 1 - charge * 2;
+      sy *= 1 - charge * 0.05;
+    }
+
+    // Aktionen (Schuss, Wurf, Schlag, ...)
+    switch (st.act) {
+      case 'shoot': armX -= Math.sin(ak * Math.PI) * 3; armRot += Math.sin(ak * Math.PI) * 0.35; poseRot += Math.sin(ak * Math.PI) * 0.08; break;
+      case 'throw': armRot += ak < 0.3 ? 2.2 * (ak / 0.3) : 2.2 * (1 - (ak - 0.3) / 0.25); poseRot -= Math.sin(ak * Math.PI) * 0.15; break;
+      case 'swing': poseX += Math.sin(ak * Math.PI) * 7; poseRot -= Math.sin(ak * Math.PI) * 0.3; armRot = -0.1; break;
+      case 'drop': poseRot -= Math.sin(ak * Math.PI) * 0.5; armRot = -1.3; break;
+      case 'tele': { const k = Math.sin(ak * Math.PI); sx *= 1 - k * 0.7; sy *= 1 + k * 0.6; break; }
+      case 'build': armRot = -0.3 + Math.abs(Math.sin(ak * Math.PI * 4)) * 0.8; break;
+      case 'coffee': armRot = 1.6; headRot = -0.35; armX = -1; break;
+      case 'radio': armRot = 1.9; armX = -0.5; headRot = 0.1; break;
+      case 'flip': if (air) poseRot += ak * Math.PI * 2; break;
+    }
+
+    // Landung: zusammenstauchen
+    if (st.squash > 0) { const k = st.squash; sy *= 1 - k * 0.28; sx *= 1 + k * 0.2; poseY -= k * 2; legL = 0.4 * k; legR = -0.4 * k; }
+    // Treffer: zurückzucken, rot aufleuchten
+    if (st.hurt > 0) {
+      poseRot += st.hurt * 0.35; headRot += st.hurt * 0.4;
+      ud.torsoMat.emissive.setRGB(0.4 + st.hurt * 0.6, 0.1 * (1 - st.hurt), 0.1 * (1 - st.hurt));
+      ud.torsoMat.emissiveIntensity = 0.15 + st.hurt * 0.8;
+    } else if (ud.torsoMat.emissiveIntensity !== 0.15) {
+      ud.torsoMat.emissive.copy(ud.torsoMat.color);
+      ud.torsoMat.emissiveIntensity = 0.15;
+    }
+    // Blinzeln
+    st.blink -= dt;
+    if (st.blink < -0.12) st.blink = 2 + Math.random() * 4;
+    ud.eyes.scale.y = st.blink < 0 || st.dizzy > 0 ? 0.2 : 1;
+    // Schwindel
+    ud.stars.visible = st.dizzy > 0;
+    if (st.dizzy > 0) { ud.stars.rotation.y += dt * 6; headRot += Math.sin(this.time * 7) * 0.12; }
+
+    ud.body.scale.x = facing;
+    ud.pose.rotation.z = poseRot;
+    ud.pose.position.set(poseX, poseY, 0);
+    ud.pose.scale.set(sx, sy, 1);
+    ud.legL.rotation.z = legL;
+    ud.legR.rotation.z = legR;
+    ud.armB.rotation.z = armB;
+    ud.arm.rotation.z = armRot;
+    ud.arm.position.x = armX;
+    ud.headG.rotation.z = headRot;
+  }
+
+  // Aktion eines Arbeiters abspielen (shoot, throw, swing, drop, tele, build, coffee, radio, flip)
+  workerAnim(id, act) {
+    const m = this.workerMeshes.get(id);
+    if (!m) return;
+    m.userData.st.act = act;
+    m.userData.st.actT = 0;
+  }
+
+  workerHurt(id) {
+    const m = this.workerMeshes.get(id);
+    if (m) m.userData.st.hurt = 1;
+  }
+
+  workerLand(id, hard = false) {
+    const m = this.workerMeshes.get(id);
+    if (!m) return;
+    m.userData.st.squash = hard ? 1 : 0.6;
+    if (hard) m.userData.st.dizzy = 2.2;
+  }
+
+  // ---------- Grabsteine ----------
+  syncGraves(graves, teams) {
+    this.graveMeshes ||= new Map();
+    const seen = new Set();
+    for (const g of graves) {
+      seen.add(g.id);
+      let m = this.graveMeshes.get(g.id);
+      if (!m) {
+        m = makeGraveMesh(teams[g.team]?.color || '#fff');
+        m.userData.spawn = 0;
+        this.graveMeshes.set(g.id, m);
+        this.scene.add(m);
+      }
+      m.userData.spawn = Math.min(1, m.userData.spawn + 0.05);
+      const k = m.userData.spawn;
+      m.scale.setScalar(1.5 * (k < 1 ? 0.3 + k * 0.8 - Math.sin(k * Math.PI) * 0.1 : 1));
+      m.position.set(tx(g.x), ty(g.y) - 6, 4);
+      m.rotation.z = g.tilt || 0;
+    }
+    for (const [id, m] of this.graveMeshes) {
+      if (!seen.has(id)) { this.scene.remove(m); this.graveMeshes.delete(id); }
+    }
+  }
+
   clearWorkers() {
     for (const mesh of this.workerMeshes.values()) this.scene.remove(mesh);
     for (const el of this.labels.values()) el.remove();
@@ -369,12 +652,14 @@ export class Renderer {
   }
 
   // ---------- Projektile ----------
-  setProjectiles(list) {
-    // list: [{type, x, y, rot, facing}]
+  setProjectiles(list, dt = 1 / 60) {
+    // list: [{type, x, y, rot, facing, fuse}]
+    this.fuseLabels ||= [];
     while (this.projectileMeshes.length > list.length) {
       const m = this.projectileMeshes.pop();
       this.scene.remove(m);
     }
+    let fl = 0;
     for (let i = 0; i < list.length; i++) {
       const p = list[i];
       let m = this.projectileMeshes[i];
@@ -382,13 +667,71 @@ export class Renderer {
         if (m) this.scene.remove(m);
         m = makeProjectileMesh(p.type);
         m.userData.type = p.type;
+        m.userData.trail = 0;
         this.projectileMeshes[i] = m;
         this.scene.add(m);
       }
       m.position.set(tx(p.x), ty(p.y), 6);
       m.rotation.z = -(p.rot || 0);
       m.scale.x = p.facing < 0 ? -1 : 1;
+      const ud = m.userData;
+      // Kleine Animationen je Projektil
+      if (p.type === 'stapler') {
+        for (const wh of ud.wheels) wh.rotation.y += dt * 14;
+        ud.fork.position.y = -3 + Math.sin(this.time * 6) * 1.2;
+        ud.beacon.material.color.setHSL(0.08, 1, Math.sin(this.time * 14) > 0 ? 0.55 : 0.2);
+        m.position.y += Math.abs(Math.sin(this.time * 25)) * 0.6; // Motor rüttelt
+      }
+      ud.trail += dt;
+      if (p.type === 'paket' && ud.trail > 0.035) {
+        ud.trail = 0;
+        this.smokePuff(p.x, p.y, '#9e9e9e', 2.2);
+      } else if (p.type === 'gas' && ud.trail > 0.09) {
+        ud.trail = 0;
+        this.smokePuff(p.x + (Math.random() - 0.5) * 3, p.y - 9, '#eceff1', 1.6, 70);
+      } else if (p.type === 'palette' && ud.trail > 0.08) {
+        ud.trail = 0;
+        this.smokePuff(p.x, p.y - 6, '#d7ccc8', 1.2);
+      }
+      // Zünder-Countdown
+      if (p.fuse != null && p.fuse > 0) {
+        let el = this.fuseLabels[fl];
+        if (!el) {
+          el = document.createElement('div');
+          el.className = 'fuse';
+          this.labelLayer.appendChild(el);
+          this.fuseLabels[fl] = el;
+        }
+        const sec = Math.ceil(p.fuse);
+        if (el.textContent !== String(sec)) el.textContent = sec;
+        el.classList.toggle('hot', sec <= 1);
+        el.style.display = '';
+        const pp = this.project(tx(p.x), ty(p.y) + 16);
+        el.style.transform = `translate(${pp.x}px, ${pp.y}px) translate(-50%, -100%)`;
+        fl++;
+      }
     }
+    for (let i = fl; i < this.fuseLabels.length; i++) this.fuseLabels[i].style.display = 'none';
+  }
+
+  smokePuff(x, y, color, size = 2, rise = 30) {
+    const p = new THREE.Mesh(new THREE.SphereGeometry(size, 6, 5),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.5, depthWrite: false }));
+    p.position.set(tx(x), ty(y), 5);
+    this.addParticle(p, (Math.random() - 0.5) * 15, rise * (0.5 + Math.random()), 0, 0.7, false, true);
+  }
+
+  // Staub beim Landen
+  dust(x, y, amount = 1) {
+    const n = Math.round(6 + amount * 10);
+    for (let i = 0; i < n; i++) {
+      const p = new THREE.Mesh(new THREE.SphereGeometry(1.5 + Math.random() * 2.5 * amount, 6, 5),
+        new THREE.MeshBasicMaterial({ color: Math.random() < 0.5 ? '#bcaaa4' : '#a1887f', transparent: true, opacity: 0.7, depthWrite: false }));
+      p.position.set(tx(x), ty(y), 10);
+      const dir = i % 2 ? 1 : -1;
+      this.addParticle(p, dir * (40 + Math.random() * 90 * amount), 10 + Math.random() * 40, 0, 0.6 + Math.random() * 0.4, false, true);
+    }
+    this.shake = Math.min(18, this.shake + amount * 4);
   }
 
   // ---------- Effekte ----------
@@ -404,6 +747,12 @@ export class Renderer {
     light.position.copy(pos).setZ(60);
     this.scene.add(light);
     this.flashes.push({ mesh: flash, light, t: 0, r });
+    // Druckwelle
+    const ring = new THREE.Mesh(new THREE.RingGeometry(0.8, 1, 40),
+      new THREE.MeshBasicMaterial({ color: '#fff3e0', transparent: true, opacity: 0.8, depthWrite: false, side: THREE.DoubleSide }));
+    ring.position.copy(pos).setZ(14);
+    this.scene.add(ring);
+    this.rings.push({ mesh: ring, t: 0, r });
     // Trümmer: Kartonfetzen, Styropor, Schrauben
     const colors = ['#b98b54', '#8a6236', '#eeeeee', '#555', '#ffcc80'];
     const n = Math.min(40, 10 + r * 0.5);
@@ -577,6 +926,14 @@ export class Renderer {
       l.t += dt;
       l.line.material.opacity = 1 - l.t / 0.4;
       if (l.t > 0.4) { this.disposeObj(l.line); this.lasers.splice(i, 1); }
+    }
+    for (let i = this.rings.length - 1; i >= 0; i--) {
+      const r = this.rings[i];
+      r.t += dt;
+      const k = r.t / 0.4;
+      if (k >= 1) { this.disposeObj(r.mesh); this.rings.splice(i, 1); continue; }
+      r.mesh.scale.setScalar(r.r * (0.3 + k * 1.6));
+      r.mesh.material.opacity = 0.8 * (1 - k);
     }
     this.targetMarker.rotation.z += dt * 2;
 

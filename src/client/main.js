@@ -4,7 +4,7 @@ import { Net } from './net.js';
 import { Game } from './game.js';
 import { WEAPONS, WEAPON_BY_ID } from '../shared/weapons.js';
 import { MAX_HP, WORLD_W, WORLD_H } from '../shared/constants.js';
-import { unlockAudio, setMuted, isMuted } from './audio.js';
+import { unlockAudio, setMuted, isMuted, setMusicOn, isMusicOn, setMusicMode, startAmbience, audioReady } from './audio.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -99,7 +99,17 @@ $('copylink').onclick = async () => {
 $('start').onclick = () => net?.send({ t: 'start', workersPerTeam: +$('wpt').value });
 $('rematch').onclick = () => net?.send({ t: 'start', workersPerTeam: state?.workersPerTeam || 3 });
 $('tolobby').onclick = () => net?.send({ t: 'lobby' });
-$('mute').onclick = () => { setMuted(!isMuted()); $('mute').textContent = isMuted() ? '🔇' : '🔊'; };
+function renderAudioButtons() {
+  $('mute').textContent = isMuted() ? '🔇' : '🔊';
+  $('music').classList.toggle('off', !isMusicOn());
+}
+$('mute').onclick = () => { unlockAudio(); setMuted(!isMuted()); renderAudioButtons(); };
+$('music').onclick = () => { unlockAudio(); setMusicOn(!isMusicOn()); renderAudioButtons(); };
+renderAudioButtons();
+// Browser erlauben Ton erst nach einer Interaktion – beim ersten Klick/Tastendruck starten.
+const firstGesture = () => { unlockAudio(); };
+window.addEventListener('pointerdown', firstGesture, { once: true });
+window.addEventListener('keydown', firstGesture, { once: true });
 
 $('arsenal').innerHTML = WEAPONS.map((w) => `<li>${w.icon} <b>${esc(w.name)}</b>${w.ammo > 0 ? ` (${w.ammo}×)` : ''} – ${esc(w.desc)}</li>`).join('');
 
@@ -296,6 +306,10 @@ function loop(now) {
   }
 }
 function step(dt) {
+  if (audioReady()) {
+    startAmbience();
+    setMusicMode(state?.phase === 'playing' ? 'game' : 'menu');
+  }
   if (state && state.phase !== 'lobby' && game.terrain) {
     game.update(dt);
     game.render(dt);
