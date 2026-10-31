@@ -10,7 +10,7 @@
     "dev:hot": "vite",
     "dev:worker": "wrangler dev",
     "deploy": "vite build && wrangler deploy",
-    "check": "node scripts/check.mjs"
+    "check": "node scripts/check.mjs && node scripts/rope-check.mjs"
   },
   "dependencies": {
     "three": "^0.180.0"

@@ -85,7 +85,14 @@ Die KI (`src/client/ai.js`) läuft im Browser der Schichtleitung: Sie simuliert 
 
 **Hilfsmittel** (Seil, Rucksack, Fallschirm, Expander) beenden den Zug nicht: Danach darf noch geschossen werden – auch direkt vom Seil oder aus der Luft (Waffe wählen, Leertaste).
 
-**Spanngurt-Seil:** Leertaste schießt den Haken in Zielrichtung (max. 420 px). Hängt er, schwingt man mit ←/→ und fährt mit ↑/↓ ein und aus. Der Gurt wickelt sich um Kanten. Leertaste lässt los, der Schwung bleibt erhalten; in der Luft kann der Haken bis zu 5× neu geschossen werden.
+**Spanngurt-Seil** (verhält sich wie das Ninja-Seil aus Worms Armageddon, Physik in `src/shared/rope.js`, Selbsttest `scripts/rope-check.mjs`):
+- Mit ↑/↓ zielen, Leertaste schießt den Haken blitzschnell in Zielrichtung (Gurt max. 470 px). Verfehlt er, rollt er sich wieder ein.
+- Am Gurt ist man ein Pendel mit fester Länge: ←/→ geben Schwung, ↑ holt ein, ↓ fährt aus. Einholen erhält den Drehimpuls – wer im richtigen Moment einholt, wird schneller.
+- Der Gurt wickelt sich um Kanten und wickelt sich beim Zurückschwingen wieder ab. Wird das Gelände am Haken weggesprengt, reißt er aus; weggesprengte Kanten geben den Gurt frei.
+- Leertaste lässt los, der Schwung bleibt erhalten. In der Luft (mit ↑/↓ neu zielen, ←/→ Blickrichtung) kann man erneut schießen – bis zu 5× Einhaken pro Zug, danach erst wieder landen.
+- Am Gurt gibt es keinen Fallschaden, nach dem Loslassen gilt die normale Sicherheitshöhe (~160 px).
+- Vom Seil aus kann man Waffe wählen und Abwurfwaffen einsetzen (Granaten fallen mit dem eigenen Schwung, Gasflasche, Amok-Stapler) oder Zielwaffen anklicken. Danach läuft die Rückzugszeit, man hängt weiter und lässt mit Leertaste los.
+- Wer am Seil in andere Arbeiter kracht, schubst sie weg (ohne Schaden).
 
 ### Fallschaden
 
