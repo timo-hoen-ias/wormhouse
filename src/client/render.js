@@ -161,6 +161,71 @@ function makeHeldMesh(id) {
       handle.rotation.y = Math.PI / 2;
       break;
     }
+    case 'sendung': { // Rohr mit blauem Expresspaket und Antenne
+      const tube = add(new THREE.CylinderGeometry(2.2, 2.6, 12, 12), mat('#455a64', { metalness: 0.6, roughness: 0.4 }), 3);
+      tube.rotation.z = Math.PI / 2;
+      add(new THREE.BoxGeometry(4, 4, 4), mat('#1e88e5'), 9.5);
+      add(new THREE.CylinderGeometry(0.3, 0.3, 5, 6), mat('#111'), 2, 4);
+      add(new THREE.SphereGeometry(0.7, 6, 6), new THREE.MeshBasicMaterial({ color: '#00e5ff' }), 2, 6.5);
+      break;
+    }
+    case 'retoure': {
+      add(new THREE.BoxGeometry(6, 5, 5), mat('#c99a62'), 1.5);
+      add(new THREE.BoxGeometry(6.2, 1.2, 5.2), mat('#e53935'), 1.5, 0.5);
+      break;
+    }
+    case 'fass': {
+      add(new THREE.CylinderGeometry(3, 3, 7, 12), mat('#fbc02d', { metalness: 0.3 }), 1.5);
+      add(new THREE.CylinderGeometry(3.1, 3.1, 1.2, 12), mat('#212121'), 1.5, 1.2);
+      break;
+    }
+    case 'tacker': {
+      add(new THREE.BoxGeometry(8, 3, 2.5), mat('#e65100'), 3);
+      add(new THREE.BoxGeometry(2.2, 5, 2), mat('#212121'), 0.5, -2.5);
+      add(new THREE.BoxGeometry(1, 1.5, 2.6), mat('#b0bec5', { metalness: 0.8 }), 7.2, -0.8);
+      break;
+    }
+    case 'stempel': { // großer Firmenstempel
+      add(new THREE.CylinderGeometry(1, 1, 5, 8), mat('#5d4037'), 1, 0);
+      const pad = add(new THREE.BoxGeometry(7, 2.5, 5), mat('#c62828'), 1, 3.5);
+      pad.rotation.z = 0;
+      break;
+    }
+    case 'drohne': { // Tablet als Fernsteuerung
+      add(new THREE.BoxGeometry(6, 4.5, 0.8), mat('#263238'), 1.5, 1);
+      add(new THREE.BoxGeometry(5, 3.5, 0.9), new THREE.MeshBasicMaterial({ color: '#4fc3f7' }), 1.5, 1);
+      break;
+    }
+    case 'tresor': { // Funkgerät zum Kran
+      add(new THREE.BoxGeometry(3, 6, 2), mat('#37474f'), 0.5, 1);
+      add(new THREE.CylinderGeometry(0.4, 0.4, 5, 6), mat('#111'), 1.5, 6);
+      add(new THREE.SphereGeometry(0.6, 6, 6), new THREE.MeshBasicMaterial({ color: '#ffd400' }), 1.5, 8.6);
+      break;
+    }
+    case 'bohrer': { // Bohrhammer
+      add(new THREE.BoxGeometry(6, 4, 3.5), mat('#fdd835'), 2);
+      const bit = add(new THREE.CylinderGeometry(0.7, 0.3, 8, 6), mat('#9e9e9e', { metalness: 0.9, roughness: 0.3 }), 9);
+      bit.rotation.z = Math.PI / 2;
+      break;
+    }
+    case 'seil':
+    case 'seilhand': { // Ratsche mit orangem Spanngurt
+      add(new THREE.BoxGeometry(4, 3, 3), mat('#78909c', { metalness: 0.7, roughness: 0.4 }), 1);
+      if (id === 'seil') add(new THREE.CylinderGeometry(2.6, 2.6, 2.4, 12), mat('#ff8f00'), 1, 2.6).rotation.x = Math.PI / 2;
+      break;
+    }
+    case 'rucksack': {
+      add(new THREE.CylinderGeometry(2, 2, 7, 10), mat('#90a4ae', { metalness: 0.7, roughness: 0.3 }), 1);
+      add(new THREE.CylinderGeometry(1.3, 1.3, 0.6, 10), mat('#fafafa'), 1, 3.8).rotation.x = Math.PI / 2;
+      break;
+    }
+    case 'fallschirm': add(new THREE.BoxGeometry(6, 4, 4), mat('#1976d2'), 1.5); break;
+    case 'expander': {
+      add(new THREE.TorusGeometry(2.6, 0.8, 6, 14), mat('#e53935'), 2);
+      add(new THREE.BoxGeometry(1, 3, 1), mat('#b0bec5', { metalness: 0.8 }), 5, -1);
+      break;
+    }
+    case 'empty': break;
     default: add(new THREE.BoxGeometry(5, 3, 3), mat('#333'));
   }
   g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
@@ -224,6 +289,58 @@ function makeProjectileMesh(type) {
     const valve = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 1.5, 4, 8), mat('#9e9e9e', { metalness: 0.8 }));
     valve.position.y = 8;
     g.add(valve);
+  } else if (type === 'sendung') {
+    g.add(new THREE.Mesh(new THREE.BoxGeometry(11, 8, 8), mat('#1e88e5')));
+    g.add(new THREE.Mesh(new THREE.BoxGeometry(2.5, 8.2, 8.2), mat('#ffd400')));
+    const ant = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 7, 6), mat('#111'));
+    ant.position.set(-3, 6, 0);
+    const led = new THREE.Mesh(new THREE.SphereGeometry(1.2, 8, 6), new THREE.MeshBasicMaterial({ color: '#00e5ff' }));
+    led.position.set(-3, 9.5, 0);
+    g.add(ant, led);
+    g.userData.led = led;
+  } else if (type === 'retoure' || type === 'retoure2') {
+    const k = type === 'retoure' ? 1 : 0.7;
+    g.add(new THREE.Mesh(new THREE.BoxGeometry(11 * k, 9 * k, 9 * k), mat('#c99a62')));
+    g.add(new THREE.Mesh(new THREE.BoxGeometry(11.2 * k, 2 * k, 9.2 * k), mat('#e53935')));
+    g.add(new THREE.Mesh(new THREE.BoxGeometry(2 * k, 9.2 * k, 9.2 * k), mat('#e53935')));
+  } else if (type === 'fass') {
+    g.add(new THREE.Mesh(new THREE.CylinderGeometry(6, 6, 14, 16), mat('#fbc02d', { metalness: 0.3, roughness: 0.5 })));
+    for (const y of [-4, 4]) {
+      const ring = new THREE.Mesh(new THREE.CylinderGeometry(6.2, 6.2, 1.2, 16), mat('#212121'));
+      ring.position.y = y;
+      g.add(ring);
+    }
+    const sign = new THREE.Mesh(new THREE.CircleGeometry(3, 3), new THREE.MeshBasicMaterial({ color: '#d50000' }));
+    sign.position.z = 6.1;
+    g.add(sign);
+  } else if (type === 'drohne') {
+    g.add(new THREE.Mesh(new THREE.BoxGeometry(10, 3, 8), mat('#eceff1')));
+    const cam = new THREE.Mesh(new THREE.SphereGeometry(1.8, 8, 6), mat('#212121'));
+    cam.position.set(4, -2, 0);
+    g.add(cam);
+    const props = [];
+    for (const [x, z] of [[-6, -5], [6, -5], [-6, 5], [6, 5]]) {
+      const arm = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), mat('#455a64'));
+      arm.position.set(x * 0.6, 1, z * 0.6);
+      const prop = new THREE.Mesh(new THREE.BoxGeometry(8, 0.4, 1.2), mat('#263238'));
+      prop.position.set(x, 2.5, z);
+      g.add(arm, prop);
+      props.push(prop);
+    }
+    const led = new THREE.Mesh(new THREE.SphereGeometry(0.9, 6, 6), new THREE.MeshBasicMaterial({ color: '#ff1744' }));
+    led.position.set(-5, 1, 0);
+    g.add(led);
+    g.userData.props = props;
+    g.userData.led = led;
+  } else if (type === 'tresor') {
+    g.add(new THREE.Mesh(new THREE.BoxGeometry(20, 22, 16), mat('#455a64', { metalness: 0.6, roughness: 0.45 })));
+    const door = new THREE.Mesh(new THREE.BoxGeometry(16, 18, 1), mat('#546e7a', { metalness: 0.7, roughness: 0.35 }));
+    door.position.z = 8.2;
+    const dial = new THREE.Mesh(new THREE.CylinderGeometry(3, 3, 1.5, 16), mat('#cfd8dc', { metalness: 0.9, roughness: 0.2 }));
+    dial.rotation.x = Math.PI / 2; dial.position.set(0, 2, 9);
+    const handle = new THREE.Mesh(new THREE.BoxGeometry(1.5, 6, 1.5), mat('#cfd8dc', { metalness: 0.9 }));
+    handle.position.set(5, -4, 9.2);
+    g.add(door, dial, handle);
   } else if (type === 'palette') {
     const wood = mat('#c8a165');
     for (let i = -1; i <= 1; i++) {
@@ -528,14 +645,14 @@ export class Renderer {
     st.hurt = Math.max(0, st.hurt - dt * 2.5);
     st.dizzy = Math.max(0, st.dizzy - dt);
     if (st.act) { st.actT += dt; }
-    const actDur = { shoot: 0.3, throw: 0.4, swing: 0.45, drop: 0.5, tele: 0.5, build: 0.6, coffee: 1.8, radio: 1.2, flip: 0.7 }[st.act] || 0;
+    const actDur = { shoot: 0.3, throw: 0.4, swing: 0.45, drop: 0.5, tele: 0.5, build: 0.6, coffee: 1.8, radio: 1.2, flip: 0.7, uppercut: 0.55, drill: 0.15 }[st.act] || 0;
     if (st.act && st.actT > actDur) st.act = null;
     const ak = st.act ? st.actT / actDur : 0; // 0..1 Fortschritt der Aktion
 
     // Grundpose
     let poseRot = 0, poseX = 0, poseY = 0, sx = 1, sy = 1;
     let legL = 0, legR = 0, armB = 0.25, headRot = 0;
-    let armRot = held?.aimArm ? -(w.aim || 0) : (held ? -0.9 : -(w.aim || 0) * 0.3 - 0.6);
+    let armRot = held?.armAngle != null ? held.armAngle : held?.aimArm ? -(w.aim || 0) : (held ? -0.9 : -(w.aim || 0) * 0.3 - 0.6);
     let armX = 1;
 
     if (air) {
@@ -578,6 +695,8 @@ export class Renderer {
       case 'coffee': armRot = 1.6; headRot = -0.35; armX = -1; break;
       case 'radio': armRot = 1.9; armX = -0.5; headRot = 0.1; break;
       case 'flip': if (air) poseRot += ak * Math.PI * 2; break;
+      case 'uppercut': armRot = ak < 0.25 ? -1.2 + ak * 4 * 2.9 : 1.7; poseRot += Math.sin(ak * Math.PI) * 0.25; sy *= 1 + Math.sin(ak * Math.PI) * 0.12; break;
+      case 'drill': poseX += (Math.random() - 0.5) * 1.6; poseY += (Math.random() - 0.5) * 1.2; headRot += (Math.random() - 0.5) * 0.2; break;
     }
 
     // Landung: zusammenstauchen
@@ -692,6 +811,14 @@ export class Renderer {
         ud.fork.position.y = -3 + Math.sin(this.time * 6) * 1.2;
         ud.beacon.material.color.setHSL(0.08, 1, Math.sin(this.time * 14) > 0 ? 0.55 : 0.2);
         m.position.y += Math.abs(Math.sin(this.time * 25)) * 0.6; // Motor rüttelt
+      } else if (p.type === 'drohne') {
+        for (const pr of ud.props) pr.rotation.y += dt * 40;
+        ud.led.visible = Math.sin(this.time * 12) > 0;
+        m.scale.y = Math.cos(p.rot || 0) < 0 ? -1 : 1; // nicht kopfüber fliegen
+      } else if (p.type === 'sendung') {
+        ud.led.visible = Math.sin(this.time * 20) > 0;
+      } else if (p.type === 'fass') {
+        m.rotation.z = -(p.rot || 0) * 0.3;
       }
       ud.trail += dt;
       if (p.type === 'paket' && ud.trail > 0.035) {
@@ -700,6 +827,12 @@ export class Renderer {
       } else if (p.type === 'gas' && ud.trail > 0.09) {
         ud.trail = 0;
         this.smokePuff(p.x + (Math.random() - 0.5) * 3, p.y - 9, '#eceff1', 1.6, 70);
+      } else if (p.type === 'sendung' && ud.trail > 0.03) {
+        ud.trail = 0;
+        this.smokePuff(p.x, p.y, '#80deea', 2);
+      } else if (p.type === 'tresor' && ud.trail > 0.05) {
+        ud.trail = 0;
+        this.smokePuff(p.x + (Math.random() - 0.5) * 16, p.y - 12, '#b0bec5', 2.5, 10);
       } else if (p.type === 'palette' && ud.trail > 0.08) {
         ud.trail = 0;
         this.smokePuff(p.x, p.y - 6, '#d7ccc8', 1.2);
@@ -804,11 +937,11 @@ export class Renderer {
     }
   }
 
-  laser(x1, y1, x2, y2) {
+  laser(x1, y1, x2, y2, color = '#ff1744') {
     const geo = new THREE.BufferGeometry().setFromPoints([
       new THREE.Vector3(tx(x1), ty(y1), 12), new THREE.Vector3(tx(x2), ty(y2), 12),
     ]);
-    const line = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: '#ff1744', transparent: true }));
+    const line = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: color || '#ff1744', transparent: true }));
     this.scene.add(line);
     this.lasers.push({ line, t: 0 });
   }
@@ -826,6 +959,92 @@ export class Renderer {
     this.scene.remove(m);
     m.geometry?.dispose();
     m.material?.dispose?.();
+  }
+
+  // ---------- Hilfsmittel (Spanngurt, Expander, Rucksack, Fallschirm) ----------
+  // g: {k, on, p:[x,y,...], x, y, facing} oder null
+  showGear(g, dt = 1 / 60) {
+    if (!this.gear) {
+      const gear = new THREE.Group();
+      this.scene.add(gear);
+      const strapMat = mat('#ff8f00', { roughness: 0.6 });
+      const rubberMat = mat('#c62828', { roughness: 0.5 });
+      const hook = new THREE.Group();
+      const hk = new THREE.Mesh(new THREE.TorusGeometry(2.6, 0.8, 6, 12, Math.PI * 1.4), mat('#b0bec5', { metalness: 0.9, roughness: 0.3 }));
+      hook.add(hk);
+      gear.add(hook);
+      // Druckluft-Rucksack: zwei Flaschen + Flamme
+      const pack = new THREE.Group();
+      for (const z of [-2.2, 2.2]) {
+        const tank = new THREE.Mesh(new THREE.CylinderGeometry(2.2, 2.2, 10, 10), mat('#90a4ae', { metalness: 0.7, roughness: 0.3 }));
+        tank.position.z = z;
+        pack.add(tank);
+      }
+      const flame = new THREE.Mesh(new THREE.ConeGeometry(2.6, 12, 10), new THREE.MeshBasicMaterial({ color: '#e3f2fd', transparent: true, opacity: 0.85, depthWrite: false }));
+      flame.rotation.z = Math.PI; flame.position.y = -11;
+      pack.add(flame);
+      gear.add(pack);
+      // Fallschirm aus Lagerplane
+      const chute = new THREE.Group();
+      const canopy = new THREE.Mesh(new THREE.SphereGeometry(30, 16, 6, 0, Math.PI * 2, 0, Math.PI / 2.6),
+        mat('#29b6f6', { side: THREE.DoubleSide, roughness: 0.8, emissive: '#0d47a1', emissiveIntensity: 0.25 }));
+      canopy.scale.y = 0.5;
+      canopy.position.y = 52;
+      chute.add(canopy);
+      const lineMat = new THREE.LineBasicMaterial({ color: '#eeeeee' });
+      for (const x of [-25, -9, 9, 25]) {
+        chute.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 4, 0), new THREE.Vector3(x, 52, 0)]), lineMat));
+      }
+      gear.add(chute);
+      this.gear = { group: gear, segs: [], strapMat, rubberMat, hook, pack, flame, chute, chuteSway: 0 };
+    }
+    const G = this.gear;
+    const k = g?.k;
+    G.pack.visible = k === 'jet';
+    G.chute.visible = k === 'chute';
+    const pts = (k === 'rope' || k === 'bungee') && g.p ? g.p : null;
+    G.hook.visible = !!pts && k === 'rope';
+    let used = 0;
+    if (pts) {
+      // Gurt vom Anker über die Knickpunkte bis zur Hand
+      const chain = [];
+      for (let i = 0; i < pts.length; i += 2) chain.push([pts[i], pts[i + 1]]);
+      chain.push([g.x, g.y - 2]);
+      for (let i = 0; i < chain.length - 1; i++) {
+        let m = G.segs[used];
+        if (!m) {
+          m = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), G.strapMat);
+          m.castShadow = true;
+          G.group.add(m);
+          G.segs[used] = m;
+        }
+        const [ax, ay] = chain[i], [bx, by] = chain[i + 1];
+        const len = Math.hypot(bx - ax, by - ay);
+        m.material = k === 'bungee' ? G.rubberMat : G.strapMat;
+        const thick = k === 'bungee' ? (g.on ? 1.6 : 2.4) : 3;
+        m.scale.set(Math.max(0.1, len), thick, k === 'bungee' ? thick : 1);
+        m.position.set(tx((ax + bx) / 2), ty((ay + by) / 2), 6);
+        m.rotation.z = Math.atan2(-(by - ay), bx - ax);
+        m.visible = true;
+        used++;
+      }
+      G.hook.position.set(tx(pts[0]), ty(pts[1]), 7);
+      G.hook.rotation.z = this.time * (g.on ? 0 : 20);
+    }
+    for (let i = used; i < G.segs.length; i++) G.segs[i].visible = false;
+    if (k === 'jet') {
+      G.pack.position.set(tx(g.x - (g.facing < 0 ? -1 : 1) * 6), ty(g.y) + 3, 1);
+      G.flame.visible = !!g.on;
+      if (g.on) {
+        G.flame.scale.set(1, 0.7 + Math.random() * 0.6, 1);
+        if (Math.random() < dt * 30) this.smokePuff(g.x - (g.facing < 0 ? -1 : 1) * 6, g.y + 16, '#eceff1', 2, -40);
+      }
+    }
+    if (k === 'chute') {
+      G.chuteSway += dt;
+      G.chute.position.set(tx(g.x), ty(g.y), 6);
+      G.chute.rotation.z = Math.sin(G.chuteSway * 2) * 0.08;
+    }
   }
 
   // ---------- Zielhilfen ----------

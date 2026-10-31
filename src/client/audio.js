@@ -276,6 +276,42 @@ export const sfx = {
       tone(midi(n - 12), midi(n - 12), d + 0.15, { type: 'triangle', gain: 0.12, t: at });
     });
   },
+  tack() { // Elektrotacker: kurzes „Tschak“
+    noise(0.035, { freq: 3500, type: 'highpass', gain: 0.22 });
+    tone(rand(700, 900), 200, 0.05, { type: 'square', gain: 0.07, filter: 2500 });
+  },
+  rope() { // Haken fliegt, Gurt rauscht von der Ratsche
+    noise(0.25, { freq: 900, f1: 3000, type: 'bandpass', q: 2, gain: 0.25 });
+    const t = now();
+    for (let i = 0; i < 5; i++) tone(1400, 1400, 0.02, { type: 'square', gain: 0.04, t: t + i * 0.04 });
+  },
+  clank() { metal(rand(420, 520), 0.35, { gain: 0.16 }); noise(0.04, { freq: 2500, type: 'bandpass', gain: 0.15 }); },
+  release() { noise(0.12, { freq: 1800, f1: 600, type: 'bandpass', q: 1.5, gain: 0.18 }); tone(500, 300, 0.08, { type: 'triangle', gain: 0.06 }); },
+  jetOn() { noise(0.4, { freq: 300, f1: 2500, type: 'bandpass', q: 0.8, gain: 0.35 }); },
+  jetOff() { noise(0.3, { freq: 2000, f1: 300, type: 'bandpass', q: 0.8, gain: 0.2 }); },
+  chute() { // Plane klappt auf
+    noise(0.25, { freq: 400, f1: 150, type: 'lowpass', gain: 0.5 });
+    noise(0.12, { freq: 1200, type: 'bandpass', q: 1, gain: 0.2, t: now() + 0.05 });
+  },
+  drill() { // Bohrhammer-Rattern
+    const t = now();
+    for (let i = 0; i < 4; i++) {
+      tone(rand(90, 120), 60, 0.03, { type: 'square', gain: 0.12, t: t + i * 0.027, filter: 1200 });
+      noise(0.02, { freq: 2200, type: 'bandpass', q: 1.5, gain: 0.12, t: t + i * 0.027 });
+    }
+  },
+  stamp() { // ABGESTEMPELT!
+    tone(180, 60, 0.18, { type: 'sine', gain: 0.6 });
+    noise(0.08, { freq: 1500, gain: 0.4 });
+    voice(rand(150, 200), 0.3, [VOWEL.a, VOWEL.u], { gain: 0.15, t: now() + 0.08, glide: 0.7 });
+  },
+  choir() { // „Halleluja“ des Gefahrgut-Fasses
+    const t = now();
+    [[57, 64, 69], [60, 65, 69], [64, 69, 72]].forEach((ch, i) => ch.forEach((n) => {
+      voice(midi(n), 0.38, [VOWEL.a, VOWEL.a], { gain: 0.06, t: t + i * 0.26, glide: 1 });
+    }));
+  },
+  clang() { metal(rand(140, 180), 0.8, { gain: 0.25, wet: 0.5 }); tone(90, 40, 0.3, { type: 'sine', gain: 0.4 }); },
   lose() {
     const t = now();
     [64, 63, 62, 61].forEach((n, i) => tone(midi(n), midi(n), 0.4, { type: 'triangle', gain: 0.12, t: t + i * 0.35, wet: 0.3 }));
@@ -329,6 +365,28 @@ export function setLoop(name, on, param = 0) {
     l.o.frequency.setTargetAtTime(f, t, 0.03);
     l.o2.frequency.setTargetAtTime(f * 1.005, t, 0.03);
     l.g.gain.setTargetAtTime(on && !muted ? 0.07 : 0, t, on ? 0.02 : 0.05);
+  } else if (name === 'drone') { // Propellersummen der Inventur-Drohne
+    const l = loopNode(name, () => {
+      const o = ctx.createOscillator(); o.type = 'sawtooth'; o.frequency.value = 180;
+      const lfo = ctx.createOscillator(); lfo.frequency.value = 23;
+      const lg = ctx.createGain(); lg.gain.value = 12; lfo.connect(lg).connect(o.frequency);
+      const f = ctx.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 900; f.Q.value = 2;
+      const g = ctx.createGain(); g.gain.value = 0;
+      o.connect(f).connect(g); out(g);
+      o.start(); lfo.start();
+      return { g };
+    });
+    l.g.gain.setTargetAtTime(on && !muted ? 0.06 : 0, t, 0.08);
+  } else if (name === 'jet') { // Druckluft-Rucksack: Rauschen
+    const l = loopNode(name, () => {
+      const s = ctx.createBufferSource(); s.buffer = noiseBuf; s.loop = true;
+      const f = ctx.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 1400; f.Q.value = 0.7;
+      const g = ctx.createGain(); g.gain.value = 0;
+      s.connect(f).connect(g); out(g);
+      s.start();
+      return { g };
+    });
+    l.g.gain.setTargetAtTime(on && !muted ? 0.16 : 0, t, 0.05);
   }
 }
 

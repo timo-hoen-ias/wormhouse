@@ -2,7 +2,7 @@
 import { Renderer } from './render.js';
 import { Net } from './net.js';
 import { Game } from './game.js';
-import { WEAPONS, WEAPON_BY_ID } from '../shared/weapons.js';
+import { WEAPONS, WEAPON_BY_ID, WEAPON_CATS } from '../shared/weapons.js';
 import { MAX_HP, WORLD_W, WORLD_H, TEAM_COLORS } from '../shared/constants.js';
 import { RULES, AMMO_OPTIONS, AMMO_PRESETS, BOT_LEVELS, MAX_TEAMS, configurableWeapons, ammoFromRules } from '../shared/rules.js';
 import { unlockAudio, setMuted, isMuted, setMusicOn, isMusicOn, setMusicMode, startAmbience, audioReady } from './audio.js';
@@ -10,8 +10,9 @@ import { unlockAudio, setMuted, isMuted, setMusicOn, isMusicOn, setMusicMode, st
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-const WEAPON_KEYS = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7', 'Digit8', 'Digit9', 'Digit0', 'Minus'];
-const KEY_LABELS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0', 'ß'];
+// Tasten 1–9, 0 wählen ein Fach im Waffenregal, mehrfach drücken schaltet durch.
+const WEAPON_KEYS = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7', 'Digit8', 'Digit9', 'Digit0'];
+const KEY_LABELS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'];
 
 // ---------- Identität ----------
 function storage(key, fallback) {
@@ -295,15 +296,20 @@ function renderWeapons() {
   const el = $('weapons');
   const myTurn = game.myTurn && game.tp === 'aim';
   el.innerHTML = '';
-  WEAPONS.forEach((w, i) => {
-    const b = document.createElement('button');
-    b.className = 'wbtn' + (game.myTurn && game.weapon === w.id ? ' sel' : '');
-    const ammo = state?.teams?.[game.myTeamIndex()]?.ammo?.[w.id] ?? w.ammo;
-    b.innerHTML = `<span class="key">${KEY_LABELS[i]}</span>${w.icon}<span class="ammo">${ammo < 0 ? '∞' : ammo}</span>`;
-    b.title = `${w.name} – ${w.desc}`;
-    b.disabled = !myTurn || ammo === 0;
-    b.onclick = () => { game.selectWeapon(w.id); };
-    el.appendChild(b);
+  WEAPON_CATS.forEach((list, ci) => {
+    const grp = document.createElement('div');
+    grp.className = 'wgroup';
+    list.forEach((w, j) => {
+      const b = document.createElement('button');
+      b.className = 'wbtn' + (game.myTurn && game.weapon === w.id ? ' sel' : '') + (w.util ? ' util' : '');
+      const ammo = state?.teams?.[game.myTeamIndex()]?.ammo?.[w.id] ?? w.ammo;
+      b.innerHTML = `${j === 0 ? `<span class="key">${KEY_LABELS[ci]}</span>` : ''}${w.icon}<span class="ammo">${ammo < 0 ? '∞' : ammo}</span>`;
+      b.title = `${w.name} – ${w.desc}`;
+      b.disabled = !myTurn || ammo === 0;
+      b.onclick = () => { game.selectWeapon(w.id); };
+      grp.appendChild(b);
+    });
+    el.appendChild(grp);
   });
   const w = WEAPON_BY_ID[game.weapon];
   $('weaponinfo').innerHTML = game.myTurn ? `<b>${w.icon} ${esc(w.name)}</b> – ${esc(w.desc)}` : '';
@@ -394,7 +400,7 @@ window.addEventListener('keydown', (e) => {
   if (GAME_KEYS.has(e.code)) e.preventDefault();
   if (e.code === 'KeyT') { e.preventDefault(); $('chatinput').focus(); return; }
   const wi = WEAPON_KEYS.indexOf(e.code);
-  if (wi >= 0 && WEAPONS[wi]) { game.selectWeapon(WEAPONS[wi].id); return; }
+  if (wi >= 0) { if (!e.repeat) game.selectCategory(wi); return; }
   if (e.repeat) { game.keys.add(e.code); return; }
   unlockAudio();
   game.keyDown(e.code);
