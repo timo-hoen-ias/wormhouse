@@ -137,10 +137,11 @@ $('botlevel').innerHTML = levelOptions(prefLevel());
 $('sololevel').onchange = () => { store('wh.botlevel', $('sololevel').value); $('botlevel').value = $('sololevel').value; };
 $('botlevel').onchange = () => { if (+$('botlevel').value > 0) { store('wh.botlevel', $('botlevel').value); $('sololevel').value = $('botlevel').value; } };
 $('addbot').onclick = () => net?.send({ t: 'addBot', level: +$('botlevel').value });
+$('addhuman').onclick = () => net?.send({ t: 'addBot', human: true, level: prefLevel() });
 $('allbots').onchange = () => {
   const level = +$('allbots').value;
   if (!state || !Number.isFinite(level)) return;
-  for (const b of state.bots) net?.send({ t: 'bot', id: b.id, level });
+  for (const b of state.bots) if (!b.human) net?.send({ t: 'bot', id: b.id, level });
   $('allbots').value = '';
 };
 // Während der Schicht: Schichtleitung klickt auf die Stufe eines KI-Teams, um sie zu ändern
@@ -229,11 +230,14 @@ function renderTeams(isHost) {
   });
   for (const b of state.bots) {
     const lvl = BOT_LEVELS[b.level] || BOT_LEVELS[2];
-    rows.push(`<li class="team bot" style="--team:${b.color}">
+    // Jeder Gegner-Platz ist entweder KI oder ein lokaler Mitspieler (Hotseat am selben Gerät).
+    const kind = `<option value="human"${b.human ? ' selected' : ''}>👤 Spieler (lokal)</option>`
+      + BOT_LEVELS.map((x) => `<option value="${x.level}"${!b.human && x.level === b.level ? ' selected' : ''}>🤖 ${esc(x.name)}</option>`).join('');
+    rows.push(`<li class="team ${b.human ? 'local' : 'bot'}" style="--team:${b.color}">
       <div class="trow"><span class="dot"></span>
         ${isHost ? `<input class="botname" data-bot="${b.id}" maxlength="20" value="${esc(b.name)}" />` : `<b>${esc(b.name)}</b>`}
-        ${isHost ? `<select data-botlevel="${b.id}">${BOT_LEVELS.map((x) => `<option value="${x.level}"${x.level === b.level ? ' selected' : ''}>🤖 ${esc(x.name)}</option>`).join('')}</select>`
-          : `<span class="who">🤖 ${esc(lvl.name)}</span>`}
+        ${isHost ? `<select data-botlevel="${b.id}" title="Wer steuert dieses Team?">${kind}</select>`
+          : `<span class="who">${b.human ? '👤 Spieler (lokal)' : `🤖 ${esc(lvl.name)}`}</span>`}
         ${isHost ? `<button class="small ghost" data-rmbot="${b.id}" title="Entfernen">✕</button>` : ''}
       </div>
       ${isHost ? colorPicker(b.color, used, `data-botcolor="${b.id}"`) : ''}
@@ -252,7 +256,11 @@ function renderTeams(isHost) {
   }
   el.querySelectorAll('[data-own]').forEach((b) => { b.onclick = () => net?.send({ t: 'team', color: b.dataset.color }); });
   el.querySelectorAll('[data-botcolor]').forEach((b) => { b.onclick = () => net?.send({ t: 'bot', id: b.dataset.botcolor, color: b.dataset.color }); });
-  el.querySelectorAll('[data-botlevel]').forEach((sel) => { sel.onchange = () => net?.send({ t: 'bot', id: sel.dataset.botlevel, level: +sel.value }); });
+  el.querySelectorAll('[data-botlevel]').forEach((sel) => {
+    sel.onchange = () => net?.send(sel.value === 'human'
+      ? { t: 'bot', id: sel.dataset.botlevel, human: true }
+      : { t: 'bot', id: sel.dataset.botlevel, human: false, level: +sel.value });
+  });
   el.querySelectorAll('.botname').forEach((inp) => {
     inp.onchange = () => net?.send({ t: 'bot', id: inp.dataset.bot, name: inp.value });
     inp.onkeydown = (e) => { e.stopPropagation(); if (e.key === 'Enter') inp.blur(); };
@@ -296,7 +304,7 @@ function renderLobby() {
     renderRules(isHost);
     const teams = state.players.length + state.bots.length;
     $('addbotrow').classList.toggle('hidden', !isHost || teams >= MAX_TEAMS);
-    $('allbotsrow').classList.toggle('hidden', !isHost || state.bots.length < 2);
+    $('allbotsrow').classList.toggle('hidden', !isHost || state.bots.filter((b) => !b.human).length < 2);
     if (!$('allbots').options.length) $('allbots').innerHTML = `<option value="">🤖 Alle KI-Teams auf …</option>${levelOptions(-1)}`;
     $('hostcontrols').classList.toggle('hidden', !isHost);
     $('waithost').classList.toggle('hidden', isHost);
@@ -327,7 +335,7 @@ function renderWeapons() {
     list.forEach((w, j) => {
       const b = document.createElement('button');
       b.className = 'wbtn' + (game.myTurn && game.weapon === w.id ? ' sel' : '') + (w.util ? ' util' : '');
-      const ammo = state?.teams?.[game.myTeamIndex()]?.ammo?.[w.id] ?? w.ammo;
+      const ammo = state?.teams?.[game.myTurn ? state.turn?.team : game.myTeamIndex()]?.ammo?.[w.id] ?? w.ammo;
       b.innerHTML = `${j === 0 ? `<span class="key">${KEY_LABELS[ci]}</span>` : ''}${w.icon}<span class="ammo">${ammo < 0 ? '∞' : ammo}</span>`;
       b.title = `${w.name} – ${w.desc}`;
       b.disabled = !myTurn || ammo === 0;
@@ -359,7 +367,7 @@ function updateHud() {
     const max = (state.rules?.workersPerTeam || 3) * (state.rules?.hp || MAX_HP);
     const conn = !t.pid || state.players.find((p) => p.pid === t.pid)?.connected;
     return `<div class="teambar ${hp <= 0 ? 'off' : ''} ${turn && turn.team === i ? 'current' : ''}">
-      <span class="tname" style="color:${t.color}">${t.bot ? '🤖 ' : ''}${esc(t.name)}${conn ? '' : ' 💤'}</span>${t.bot > 0 ? lvlTag(t, i) : ''}
+      <span class="tname" style="color:${t.color}">${t.bot ? '🤖 ' : t.local ? '👤 ' : ''}${esc(t.name)}${conn ? '' : ' 💤'}</span>${t.bot > 0 ? lvlTag(t, i) : ''}
       <div class="bar"><div class="fill" style="width:${(hp / max) * 100}%;background:${t.color}"></div></div>
       <span>${hp}</span></div>`;
   }).join('');

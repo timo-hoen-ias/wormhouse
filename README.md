@@ -6,6 +6,8 @@ Rundenbasiertes Multiplayer-Artillery-Spiel im Stil der Worms-Klassiker: Teams a
 
 **Einzelspieler:** Namen eingeben, **„Einzelspieler“**. Du landest in deiner eigenen Lobby mit einem KI-Team, kannst weitere KI-Teams dazunehmen, Regeln einstellen und loslegen.
 
+**Zusammen an einem Gerät (Hotseat):** In der Lobby kann jeder Gegner-Platz statt einer KI-Stufe auf **„👤 Spieler (lokal)“** gestellt werden (oder per **„+ Spieler“** dazunehmen). Diese Teams steuert ihr abwechselnd mit derselben Tastatur und Maus; nur die 🤖-Teams spielt die KI. Geht auch in Mehrspieler-Räumen – lokale Spieler laufen dann über das Gerät der Schichtleitung.
+
 **Mehrspieler:** **„Mehrspieler-Lobby“** öffnen und den Raumlink (**„Link kopieren“**) an bis zu 5 Kolleg:innen schicken. In der Lobby (wie bei Worms):
 
 - Jede:r wählt **Teamname** und **Teamfarbe**, alle sehen sich gegenseitig.
