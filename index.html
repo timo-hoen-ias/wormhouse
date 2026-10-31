@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Wormhouse – Lagerkoller im Hochregal</title>
+  <meta name="description" content="Rundenbasiertes Multiplayer-Artillery-Spiel mit Lagerarbeitern in einer zerstörbaren Lagerhalle." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📦</text></svg>" />
+  <link rel="stylesheet" href="/src/client/style.css" />
+</head>
+<body>
+  <div id="stage"></div>
+  <div id="labels"></div>
+
+  <!-- HUD -->
+  <div id="hud" class="hidden">
+    <div id="topbar">
+      <div id="teams"></div>
+      <div id="turninfo"><div id="turnname"></div><div id="timer">45</div></div>
+      <div id="wind"><span>Wind</span><div class="windbar"><div class="windfill"></div></div></div>
+    </div>
+    <div id="weaponinfo"></div>
+    <div id="weapons"></div>
+    <div id="toast"></div>
+    <div id="hint">← → laufen · ↑ ↓ zielen · Leertaste halten = Kraft · Enter springen · ⌫ Rückwärtssalto · 1–0 Waffen · Mausrad Zoom · Ziehen = Kamera</div>
+    <div id="chat"><div id="chatlog"></div><input id="chatinput" maxlength="140" placeholder="T = Chat" /></div>
+    <button id="mute" title="Ton an/aus">🔊</button>
+  </div>
+
+  <!-- Startbildschirm -->
+  <div id="menu" class="overlay">
+    <div class="panel">
+      <div class="logo">WORM<span>HOUSE</span></div>
+      <div class="tagline">Lagerkoller im Hochregal</div>
+      <div id="menu-join">
+        <label>Dein Name<input id="name" maxlength="16" placeholder="z.B. Staplerfahrer Kalle" /></label>
+        <div class="row">
+          <button id="create" class="primary">Neue Schicht starten</button>
+        </div>
+        <div class="or">oder Raumcode eingeben</div>
+        <div class="row">
+          <input id="code" maxlength="8" placeholder="CODE" />
+          <button id="join">Beitreten</button>
+        </div>
+      </div>
+      <div id="menu-lobby" class="hidden">
+        <div class="roomcode">Raum <b id="roomcode"></b> <button id="copylink" class="small">Link kopieren</button></div>
+        <ul id="playerlist"></ul>
+        <div id="hostcontrols" class="hidden">
+          <label>Arbeiter pro Team
+            <select id="wpt"><option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option></select>
+          </label>
+          <button id="start" class="primary">Schicht beginnen!</button>
+          <div class="small-note">Allein? Dann geht's gegen die Inventur-Dummies (Übungsmodus).</div>
+        </div>
+        <div id="waithost" class="small-note hidden">Warte, bis die Schichtleitung startet …</div>
+      </div>
+      <details class="help">
+        <summary>Steuerung &amp; Arsenal</summary>
+        <p>Rundenbasiert wie früher: Jedes Team zieht abwechselnd mit einem Arbeiter. 45 Sekunden pro Zug, danach 3 Sekunden Rückzug. Wer ins Hafenbecken fällt, ist raus. Das letzte Team mit Personal gewinnt.</p>
+        <p><b>← →</b> laufen · <b>↑ ↓</b> zielen · <b>Leertaste</b> halten für Kraft, loslassen = Wurf · <b>Enter</b> Sprung · <b>⌫</b> Rückwärtssalto · <b>1–0, ß</b> Waffe wählen · <b>Klick</b> für Zielwaffen · <b>Mausrad</b> Zoom · <b>Ziehen</b> Kamera</p>
+        <ul id="arsenal"></ul>
+      </details>
+    </div>
+  </div>
+
+  <div id="gameover" class="overlay hidden">
+    <div class="panel">
+      <div class="logo small">FEIERABEND!</div>
+      <div id="winner"></div>
+      <div class="row">
+        <button id="rematch" class="primary hidden">Revanche</button>
+        <button id="tolobby" class="hidden">Zur Lobby</button>
+      </div>
+      <div id="waitrematch" class="small-note hidden">Die Schichtleitung entscheidet über die Revanche …</div>
+    </div>
+  </div>
+
+  <div id="conn" class="hidden">Verbindung verloren – verbinde neu …</div>
+
+  <script type="module" src="/src/client/main.js"></script>
+</body>
+</html>

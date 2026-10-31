@@ -1,0 +1,22 @@
+{
+  "name": "wormhouse",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Wormhouse – Lagerkoller im Hochregal. Rundenbasiertes Multiplayer-Artillery-Spiel mit Lagerarbeitern (three.js + Cloudflare Workers).",
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite build && wrangler dev",
+    "dev:hot": "vite",
+    "dev:worker": "wrangler dev",
+    "deploy": "vite build && wrangler deploy",
+    "check": "node scripts/check.mjs"
+  },
+  "dependencies": {
+    "three": "^0.180.0"
+  },
+  "devDependencies": {
+    "vite": "^6.4.0",
+    "wrangler": "^4.40.0"
+  }
+}

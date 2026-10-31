@@ -1,0 +1,107 @@
+:root {
+  --bg: #12151b;
+  --panel: rgba(22, 26, 34, 0.92);
+  --line: rgba(255, 255, 255, 0.12);
+  --text: #f1f1f1;
+  --muted: #9aa3b2;
+  --hazard: #ffc400;
+  --accent: #ff6d00;
+  font-family: 'Segoe UI', system-ui, -apple-system, Roboto, sans-serif;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--text); }
+#stage { position: fixed; inset: 0; }
+#stage canvas { display: block; }
+#labels { position: fixed; inset: 0; pointer-events: none; overflow: hidden; }
+.hidden { display: none !important; }
+
+/* Namensschilder */
+.wlabel { position: absolute; left: 0; top: 0; text-align: center; white-space: nowrap; font-size: 12px; font-weight: 700;
+  text-shadow: 0 1px 2px #000, 0 0 4px #000; display: flex; flex-direction: column; align-items: center; gap: 1px; }
+.wlabel .n { color: var(--team); }
+.wlabel .hp { background: var(--team); color: #111; padding: 0 5px; border-radius: 4px; text-shadow: none; font-size: 11px; }
+.wlabel.active .n::before { content: '▼ '; animation: bob 0.8s infinite alternate; display: inline-block; }
+@keyframes bob { from { transform: translateY(-2px); } to { transform: translateY(2px); } }
+.floattext { position: absolute; transform: translate(-50%, -50%); font-weight: 900; font-size: 22px; text-shadow: 0 2px 3px #000, 0 0 6px #000;
+  animation: floatup 1.6s ease-out forwards; }
+@keyframes floatup { from { opacity: 1; margin-top: 0; } to { opacity: 0; margin-top: -60px; } }
+
+/* Overlays */
+.overlay { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+  background: radial-gradient(ellipse at center, rgba(18,21,27,0.55), rgba(10,12,16,0.9)); z-index: 20; padding: 16px; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 28px 30px; width: min(520px, 100%);
+  box-shadow: 0 20px 60px rgba(0,0,0,0.5); max-height: 100%; overflow: auto; position: relative; }
+.panel::before { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 8px; border-radius: 14px 14px 0 0;
+  background: repeating-linear-gradient(45deg, var(--hazard) 0 14px, #111 14px 28px); }
+.logo { font-size: 54px; font-weight: 900; letter-spacing: 2px; text-align: center; line-height: 1; color: #d9a35f;
+  text-shadow: 0 4px 0 #6d4c2a, 0 8px 20px rgba(0,0,0,0.6); }
+.logo span { color: var(--hazard); text-shadow: 0 4px 0 #8a6a00, 0 8px 20px rgba(0,0,0,0.6); }
+.logo.small { font-size: 40px; }
+.tagline { text-align: center; color: var(--muted); margin: 6px 0 22px; font-style: italic; }
+label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--muted); margin-bottom: 14px; }
+input, select { background: #0e1116; border: 1px solid var(--line); color: var(--text); border-radius: 8px; padding: 10px 12px; font-size: 16px; }
+input:focus, select:focus { outline: 2px solid var(--hazard); }
+#code { text-transform: uppercase; letter-spacing: 3px; flex: 1; min-width: 0; }
+button { background: #2b313d; color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 10px 16px; font-size: 15px; font-weight: 700; cursor: pointer; }
+button:hover { filter: brightness(1.2); }
+button.primary { background: linear-gradient(#ff8f00, #ef6c00); border-color: #ff9800; color: #1a1a1a; flex: 1; }
+button.small { padding: 4px 10px; font-size: 12px; }
+button:disabled { opacity: 0.4; cursor: default; }
+.row { display: flex; gap: 10px; margin-bottom: 10px; }
+.or { text-align: center; color: var(--muted); font-size: 12px; margin: 10px 0; }
+.roomcode { font-size: 18px; margin-bottom: 12px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.roomcode b { color: var(--hazard); letter-spacing: 3px; font-size: 24px; }
+#playerlist { list-style: none; padding: 0; margin: 0 0 16px; }
+#playerlist li { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px; background: rgba(255,255,255,0.04); margin-bottom: 6px; }
+#playerlist .dot { width: 14px; height: 14px; border-radius: 50%; }
+#playerlist .tag { margin-left: auto; font-size: 11px; color: var(--muted); }
+.small-note { font-size: 12px; color: var(--muted); margin-top: 8px; text-align: center; }
+.help { margin-top: 18px; font-size: 13px; color: var(--muted); }
+.help summary { cursor: pointer; color: var(--text); }
+.help ul { padding-left: 0; list-style: none; }
+.help li { margin: 6px 0; }
+#winner { text-align: center; font-size: 22px; margin: 16px 0 20px; }
+
+/* HUD */
+#hud { position: fixed; inset: 0; pointer-events: none; z-index: 10; }
+#hud > * { pointer-events: auto; }
+#topbar { position: absolute; top: 0; left: 0; right: 0; display: flex; justify-content: space-between; align-items: flex-start; padding: 10px 14px; gap: 12px; pointer-events: none; }
+#teams { display: flex; flex-direction: column; gap: 4px; min-width: 180px; }
+.teambar { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 700; text-shadow: 0 1px 2px #000; }
+.teambar .bar { flex: 1; height: 10px; background: rgba(0,0,0,0.5); border-radius: 5px; overflow: hidden; min-width: 90px; }
+.teambar .fill { height: 100%; transition: width 0.4s; }
+.teambar.off { opacity: 0.4; }
+.teambar.current .tname::after { content: ' ◀'; }
+#turninfo { text-align: center; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 6px 18px; min-width: 160px; }
+#turnname { font-size: 13px; font-weight: 700; }
+#timer { font-size: 30px; font-weight: 900; font-variant-numeric: tabular-nums; }
+#timer.low { color: #ff5252; }
+#timer.retreat { color: #69f0ae; }
+#wind { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 6px 12px; font-size: 12px; text-align: center; min-width: 160px; }
+.windbar { position: relative; height: 10px; background: rgba(0,0,0,0.5); border-radius: 5px; margin-top: 4px; overflow: hidden; }
+.windbar::after { content: ''; position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: #fff8; }
+.windfill { position: absolute; top: 0; bottom: 0; background: linear-gradient(90deg, #4fc3f7, #b3e5fc); }
+#weapons { position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%); display: flex; gap: 6px; background: var(--panel); padding: 8px; border-radius: 12px; border: 1px solid var(--line); max-width: calc(100% - 20px); overflow-x: auto; }
+.wbtn { position: relative; width: 52px; height: 52px; font-size: 26px; padding: 0; display: flex; align-items: center; justify-content: center; flex: none; }
+.wbtn .key { position: absolute; top: 2px; left: 4px; font-size: 10px; color: var(--muted); }
+.wbtn .ammo { position: absolute; bottom: 2px; right: 4px; font-size: 11px; color: var(--hazard); }
+.wbtn.sel { outline: 3px solid var(--hazard); background: #3d3420; }
+#weaponinfo { position: absolute; bottom: 82px; left: 50%; transform: translateX(-50%); text-align: center; font-size: 13px; background: rgba(0,0,0,0.55); padding: 6px 14px; border-radius: 8px; max-width: 90%; }
+#weaponinfo b { color: var(--hazard); }
+#toast { position: absolute; top: 90px; left: 50%; transform: translateX(-50%); font-size: 20px; font-weight: 800; text-shadow: 0 2px 4px #000; opacity: 0; transition: opacity 0.3s; pointer-events: none; text-align: center; }
+#toast.show { opacity: 1; }
+#hint { position: absolute; bottom: 130px; left: 50%; transform: translateX(-50%); font-size: 11px; color: #fff9; white-space: nowrap; pointer-events: none; text-shadow: 0 1px 2px #000; }
+#chat { position: absolute; left: 10px; bottom: 10px; width: 280px; font-size: 12px; }
+#chatlog { max-height: 140px; overflow: hidden; display: flex; flex-direction: column; justify-content: flex-end; text-shadow: 0 1px 2px #000; pointer-events: none; }
+#chatlog div { margin: 1px 0; }
+#chatinput { width: 100%; padding: 6px 8px; font-size: 12px; opacity: 0.6; }
+#chatinput:focus { opacity: 1; }
+#mute { position: absolute; right: 10px; bottom: 10px; padding: 6px 10px; }
+#conn { position: fixed; top: 10px; left: 50%; transform: translateX(-50%); background: #b71c1c; padding: 8px 16px; border-radius: 8px; z-index: 30; font-weight: 700; }
+
+@media (max-width: 900px) {
+  #hint, #chat { display: none; }
+  #teams { min-width: 120px; }
+  #wind, #turninfo { min-width: 100px; }
+  .logo { font-size: 40px; }
+}
