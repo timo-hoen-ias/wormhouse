@@ -477,5 +477,21 @@ function step(dt) {
 }
 requestAnimationFrame(loop);
 
+// Hintergrund-Tab: requestAnimationFrame pausiert dann komplett. Simuliert dieser
+// Client gerade einen Zug (eigener Zug oder KI-Zug als Schichtleitung), läuft die
+// Spiellogik über einen Timer weiter – sonst warten alle anderen auf uns.
+let bgLast = performance.now();
+setInterval(() => {
+  const now = performance.now();
+  const dt = (now - bgLast) / 1000;
+  bgLast = now;
+  if (!document.hidden || !game.sim || !state || state.phase !== 'playing' || !game.terrain) return;
+  try {
+    game.update(Math.min(dt, 1), 1);
+  } catch (err) {
+    console.error(err);
+  }
+}, 200);
+
 // Für Tests/Debugging in der Konsole
 window.__wh = { game, renderer, get state() { return state; } };

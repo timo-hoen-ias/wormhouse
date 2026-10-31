@@ -9,6 +9,9 @@ import {
   TURN_GRACE_MS, MAX_PLAYERS, TEAM_COLORS, WORKER_NAMES, WATER_Y,
 } from '../shared/constants.js';
 import { WEAPON_BY_ID } from '../shared/weapons.js';
+
+const WATCHDOG_MS = 2000; // so oft prüft der Server, ob der Zug noch lebt
+const STALL_MS = 6000; // so lange ohne Snapshot = Client hängt, Zug wird beendet
 import {
   defaultRules, sanitizeRules, ammoFromRules, BOT_LEVELS, BOT_TEAM_NAMES, MAX_TEAMS,
   SUDDEN_WATER_STEP, MIN_WATER_Y,
@@ -255,20 +258,41 @@ export class GameRoom extends DurableObject {
       wind: Math.round((Math.random() * 2 - 1) * s.rules.wind * 100) / 100,
       endsAt: Date.now() + s.rules.turnTime * 1000,
     };
-    this.ctx.storage.setAlarm(s.turn.endsAt + TURN_GRACE_MS);
+    this.lastSnapAt = Date.now();
+    this.scheduleWatchdog();
+  }
+
+  anyoneCanMove() {
+    const s = this.s;
+    const connected = new Set(s.players.filter((p) => p.connected).map((p) => p.pid));
+    return s.teams.some((t, i) => this.teamAlive(i) && connected.has(this.controllerOf(t)));
+  }
+
+  // Wachhund: Der simulierende Client schickt laufend Snapshots. Bleiben die aus
+  // (Tab eingefroren, Rechner schläft, Verbindung hängt), wartet der Server nicht
+  // bis zum Ende der Gnadenfrist, sondern macht nach STALL_MS weiter.
+  scheduleWatchdog() {
+    const s = this.s;
+    if (s.phase !== 'playing' || !s.turn) return;
+    this.ctx.storage.setAlarm(Math.min(s.turn.endsAt + TURN_GRACE_MS, Date.now() + WATCHDOG_MS));
   }
 
   async alarm() {
     const s = this.s;
     if (s.phase !== 'playing' || !s.turn) return;
+    const now = Date.now();
     const activeConnected = s.players.find((p) => p.pid === this.activePid())?.connected;
-    if (Date.now() >= s.turn.endsAt + TURN_GRACE_MS - 1000 || !activeConnected) {
+    // Nach Ruhezustand (Hibernation) fehlt lastSnapAt: dann ab jetzt messen.
+    if (this.lastSnapAt == null) this.lastSnapAt = now;
+    const stalled = now - this.lastSnapAt > STALL_MS;
+    if (!activeConnected && !this.anyoneCanMove()) return; // join() weckt uns wieder
+    if (now >= s.turn.endsAt + TURN_GRACE_MS - 1000 || !activeConnected || stalled) {
       if (this.lastSnapWorkers) this.applyWorkers(this.lastSnapWorkers);
       this.advanceTurn();
       await this.save();
       this.broadcastState();
     } else {
-      this.ctx.storage.setAlarm(s.turn.endsAt + TURN_GRACE_MS);
+      this.scheduleWatchdog();
     }
   }
 
@@ -413,6 +437,7 @@ export class GameRoom extends DurableObject {
 
       case 'snap': {
         if (!this.isActive(att) || msg.n !== s.turn.n) return;
+        this.lastSnapAt = Date.now();
         if (Array.isArray(msg.w)) {
           this.lastSnapWorkers = msg.w.map((a) => ({ id: a[0], x: a[1], y: a[2], hp: a[3], dead: a[4] }));
         }

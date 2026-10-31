@@ -12,6 +12,7 @@ import { fallDamage } from '../shared/fall.js';
 import { sfx, setLoop } from './audio.js';
 
 const STEP = 1 / 60;
+const RESOLVE_MAX = 10; // Sekunden: länger wartet ein Zug nie auf Ruhe
 const WIND_ACC = 160;
 const SNAP_INTERVAL = 50;
 // Spanngurt-Seil
@@ -58,6 +59,7 @@ export class Game {
     this.acc = 0;
     this.lastSnap = 0;
     this.settleTime = 0;
+    this.quietTime = 0;
     this.resolveTime = 0;
     this.retreatEnd = 0;
     this.turnLocalEnd = 0;
@@ -194,6 +196,7 @@ export class Game {
       w.vx = 0; w.vy = 0;
       w.grounded = false;
       w.walking = false;
+      w.still = 0;
     }
   }
 
@@ -212,6 +215,7 @@ export class Game {
     this.charging = false;
     this.used = [];
     this.settleTime = 0;
+    this.quietTime = 0;
     this.resolveTime = 0;
     this.manualCam = false;
     this.turnLocalEnd = performance.now() + (state.turnMsLeft ?? 45000);
@@ -405,10 +409,12 @@ export class Game {
   }
 
   // ---------- Hauptschleife ----------
-  update(dt) {
+  // maxCatchup: wie viel Spielzeit ein einzelner Aufruf nachholen darf
+  // (im Hintergrund-Tab tickt der Browser selten, dann mehr nachholen).
+  update(dt, maxCatchup = 0.1) {
     if (!this.terrain || !this.state || this.state.phase === 'lobby') return;
     if (this.sim && this.tp !== 'done') {
-      this.acc += Math.min(dt, 0.1);
+      this.acc += Math.min(dt, maxCatchup);
       while (this.acc >= STEP) {
         this.acc -= STEP;
         this.simStep(STEP);
@@ -516,8 +522,9 @@ export class Game {
       this.tp = 'retreat';
       this.retreatEnd = now + RETREAT_TIME * 1000;
     }
-    // Zugende: Seil, Rucksack und Expander lösen sich (der Fallschirm bleibt offen)
-    if (this.mv && (this.tp === 'resolve' || !w || w.dead) && this.mv.kind !== 'chute') this.endUtility();
+    // Zugende: Seil, Rucksack und Expander lösen sich (ein offener Fallschirm bleibt offen,
+    // ein nie geöffneter wird weggepackt – sonst gilt der Zug nie als beendet)
+    if (this.mv && (this.tp === 'resolve' || !w || w.dead) && !(this.mv.kind === 'chute' && this.mv.open && w && !w.dead)) this.endUtility();
 
     if (this.ai && w && !w.dead) this.ai.update(dt);
     if (w && !w.dead && (this.tp === 'aim' || this.tp === 'retreat' || this.tp === 'control')) this.handleInput(w, dt);
@@ -537,9 +544,15 @@ export class Game {
 
     if (this.tp === 'resolve') {
       this.resolveTime += dt;
-      const settled = this.projectiles.length === 0 && !this.mv && this.workers.every((x) => x.dead || x.grounded);
+      // Ruhe = keine Geschosse, kein Hilfsmittel, alle Arbeiter gelandet bzw. reglos.
+      const quiet = this.projectiles.length === 0 && !this.mv;
+      const settled = quiet && this.workers.every((x) => x.dead || x.grounded || x.still > 0.5);
       this.settleTime = settled ? this.settleTime + dt : 0;
-      if (this.settleTime > 0.8 || this.resolveTime > 15) this.endTurn();
+      // Notbremsen: Hängt/wackelt nur noch ein Arbeiter langsam herum (fliegt aber
+      // nicht mehr), nach 2 s trotzdem weiter; insgesamt nie länger als 10 s warten.
+      const calm = quiet && this.workers.every((x) => x.dead || x.grounded || Math.hypot(x.vx, x.vy) < 80);
+      this.quietTime = calm ? this.quietTime + dt : 0;
+      if (this.settleTime > 0.8 || this.quietTime > 2 || this.resolveTime > RESOLVE_MAX) this.endTurn();
     }
   }
 
@@ -625,7 +638,12 @@ export class Game {
           o.vx -= vt * 0.25 * tx;
           o.vy -= vt * 0.25 * ty;
         } else {
+          // Bewegt sich schon weg, steckt aber an einer Kante (z.B. unter einem
+          // Überhang): ein Stück entlang der Normalen herausschieben, sonst
+          // klebt das Objekt dort für immer fest.
           o.vx *= 0.5; o.vy *= 0.5;
+          const px = o.x + n.x, py = o.y + n.y;
+          if (!this.terrain.hitsCircle(px, py, r)) { o.x = px; o.y = py; }
         }
         return { hit: true, n, impact: Math.max(0, -vn) };
       }
