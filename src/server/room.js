@@ -25,7 +25,7 @@ function freshState() {
     hostPid: null,
     solo: false, // Einzelspieler-Raum: niemand sonst kann mitspielen
     players: [], // {pid, name, team, color, connected}
-    bots: [], // {id, name, color, level}
+    bots: [], // {id, name, color, level, human} – human = lokaler Spieler am Gerät der Schichtleitung (Hotseat)
     rules: defaultRules(),
     seed: 0,
     teams: [], // {pid|null, bot (Stufe, 0 = keiner), name, color, ammo, nextWorker}
@@ -110,11 +110,12 @@ export class GameRoom extends DurableObject {
     this.chat({ sys: true, text });
   }
 
-  // Wer simuliert den laufenden Zug? Menschen sich selbst, KI-Teams die Schichtleitung.
+  // Wer simuliert den laufenden Zug? Menschen sich selbst, KI-Teams und lokale
+  // Mitspieler (Hotseat) die Schichtleitung.
   controllerOf(team) {
     if (!team) return null;
     if (team.pid) return team.pid;
-    return team.bot > 0 ? this.s.hostPid : null;
+    return team.bot > 0 || team.local ? this.s.hostPid : null;
   }
 
   activePid() {
@@ -144,10 +145,16 @@ export class GameRoom extends DurableObject {
     return TEAM_COLORS.find((c) => !used.has(c)) || '#ffffff';
   }
 
-  addBot(level = 2) {
+  addBot(level = 2, human = false) {
     const s = this.s;
     if (s.phase !== 'lobby' || this.teamCount() >= MAX_TEAMS) return false;
     const usedNames = new Set([...s.players.map((p) => p.team), ...s.bots.map((b) => b.name)]);
+    if (human) {
+      let n = 2;
+      while (usedNames.has(`Spieler ${n}`)) n++;
+      s.bots.push({ id: crypto.randomUUID().slice(0, 8), name: `Spieler ${n}`, color: this.freeColor(), level: Math.max(1, level), human: true });
+      return true;
+    }
     // „Inventur-Dummies“ bleibt den reinen Zielscheiben vorbehalten.
     const pool = level === 0 ? BOT_TEAM_NAMES : BOT_TEAM_NAMES.slice(1);
     const name = pool.find((n) => !usedNames.has(n)) || `KI-Team ${s.bots.length + 1}`;
@@ -170,7 +177,9 @@ export class GameRoom extends DurableObject {
     s.game += 1;
     s.teams = [
       ...humans.map((p) => ({ pid: p.pid, bot: 0, name: p.team || p.name, color: p.color })),
-      ...bots.map((b) => ({ pid: null, bot: b.level, botId: b.id ?? null, name: b.name, color: b.color })),
+      ...bots.map((b) => (b.human
+        ? { pid: null, bot: 0, local: true, botId: b.id ?? null, name: b.name, color: b.color }
+        : { pid: null, bot: b.level, botId: b.id ?? null, name: b.name, color: b.color })),
     ].map((t) => ({ ...t, ammo: ammoFromRules(r), nextWorker: 0 }));
     const names = [...WORKER_NAMES].sort(() => Math.random() - 0.5);
     s.workers = [];
@@ -379,7 +388,7 @@ export class GameRoom extends DurableObject {
       case 'addBot': {
         if (!this.isHost(att)) return;
         const lvl = Math.max(0, Math.min(BOT_LEVELS.length - 1, Math.round(num(msg.level, 2))));
-        if (this.addBot(lvl)) { await this.save(); this.broadcastState(); }
+        if (this.addBot(lvl, !!msg.human)) { await this.save(); this.broadcastState(); }
         break;
       }
 
@@ -389,6 +398,18 @@ export class GameRoom extends DurableObject {
         if (!b) return;
         if (msg.remove) s.bots = s.bots.filter((x) => x !== b);
         else {
+          if (msg.human != null && !!msg.human !== !!b.human) {
+            b.human = !!msg.human;
+            // Standardnamen mitwechseln: aus „Spätschicht“ wird „Spieler 2“ und umgekehrt.
+            const used = new Set([...s.players.map((p) => p.team), ...s.bots.filter((x) => x !== b).map((x) => x.name)]);
+            if (b.human && BOT_TEAM_NAMES.includes(b.name)) {
+              let n = 2;
+              while (used.has(`Spieler ${n}`)) n++;
+              b.name = `Spieler ${n}`;
+            } else if (!b.human && /^Spieler \d+$/.test(b.name)) {
+              b.name = BOT_TEAM_NAMES.slice(1).find((x) => !used.has(x)) || b.name;
+            }
+          }
           if (msg.level != null) b.level = Math.max(0, Math.min(BOT_LEVELS.length - 1, Math.round(num(msg.level, b.level))));
           if (msg.name != null) b.name = clampStr(msg.name, 20) || b.name;
           if (msg.color && TEAM_COLORS.includes(msg.color)

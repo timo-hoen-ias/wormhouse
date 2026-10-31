@@ -41,6 +41,8 @@ export class Game {
     this.projectiles = [];
     this.turnN = -1;
     this.myTurn = false; // ich (Mensch) bin am Zug
+    this.localTurn = false; // ein lokaler Mitspieler (Hotseat) an meinem Gerät ist am Zug
+    this.myWeapons = {}; // zuletzt gewählte Waffe je Team
     this.botTurn = false; // ich steuere als Schichtleitung gerade ein KI-Team
     this.sim = false; // dieser Client simuliert den laufenden Zug
     this.ai = null;
@@ -85,6 +87,11 @@ export class Game {
 
   myTeamIndex() {
     return this.teams.findIndex((t) => t.pid === this.myPid);
+  }
+
+  // Spielen an diesem Gerät mehrere Leute abwechselnd (lokale Mitspieler)?
+  hotseat(state = this.state) {
+    return state?.hostPid === this.myPid && !!state?.teams?.some((t) => t.local);
   }
 
   ammoOf(id) {
@@ -140,14 +147,16 @@ export class Game {
       this.projectiles = [];
       this.stopLoops();
       const mine = this.myTeamIndex();
-      if (mine >= 0 && state.winner !== mine) sfx.lose(); else sfx.win();
+      // Hotseat: Gewinnt irgendein Team an diesem Gerät, gibt's die Siegesfanfare.
+      const localWin = state.teams[state.winner]?.local && state.hostPid === this.myPid;
+      if (mine >= 0 && state.winner !== mine && !localWin) sfx.lose(); else sfx.win();
     }
   }
 
   controlsTurn(state) {
     const team = state.teams[state.turn?.team];
     if (!team) return false;
-    return team.pid ? team.pid === this.myPid : team.bot > 0 && state.hostPid === this.myPid;
+    return team.pid ? team.pid === this.myPid : (team.bot > 0 || !!team.local) && state.hostPid === this.myPid;
   }
 
   setWaterLevel(y) {
@@ -220,7 +229,9 @@ export class Game {
     this.turnLocalEnd = performance.now() + (state.turnMsLeft ?? 45000);
     this.retreatEnd = 0;
     const team = state.teams[t.team];
-    this.myTurn = !!team && team.pid === this.myPid;
+    // Lokale Mitspieler (Hotseat) spielen am Gerät der Schichtleitung mit derselben Steuerung.
+    this.localTurn = !!team && !team.pid && !!team.local && state.hostPid === this.myPid;
+    this.myTurn = !!team && (team.pid === this.myPid || this.localTurn);
     this.botTurn = !!team && !team.pid && team.bot > 0 && state.hostPid === this.myPid;
     this.sim = this.myTurn || this.botTurn;
     this.ai = this.botTurn ? new BotController(this, team.bot) : null;
@@ -231,10 +242,12 @@ export class Game {
       this.shotsLeft = WEAPON_BY_ID[this.weapon].shots || 1;
       this.ui.toast(`${team.name} ist dran${w ? ` (${w.name})` : ''} 🤖`, team.color);
     } else if (this.myTurn) {
-      this.weapon = this.myWeapon || this.weapon;
+      this.weapon = this.myWeapons[t.team] || this.weapon;
       if ((team.ammo[this.weapon] ?? 0) === 0) this.weapon = 'paket';
       this.shotsLeft = WEAPON_BY_ID[this.weapon].shots || 1;
-      this.ui.toast(`Du bist dran! ${w ? w.name : ''} wartet auf Anweisungen.`, team.color);
+      this.ui.toast(this.hotseat(state)
+        ? `${team.name} ist dran! ${w ? w.name : ''} wartet auf Anweisungen.`
+        : `Du bist dran! ${w ? w.name : ''} wartet auf Anweisungen.`, team.color);
       sfx.turn();
     } else if (team) {
       this.ui.toast(`${team.name} ist dran${w ? ` (${w.name})` : ''}`, team.color);
@@ -342,7 +355,7 @@ export class Game {
     if (this.weapon === 'scanner' && this.shotsLeft < (WEAPON_BY_ID.scanner.shots)) return;
     if (this.weapon !== id) this.homeTarget = null;
     this.weapon = id;
-    this.myWeapon = id;
+    if (this.turn) this.myWeapons[this.turn.team] = id;
     this.shotsLeft = wpn.shots || 1;
     this.ui.refreshWeapons();
   }
