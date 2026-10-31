@@ -42,6 +42,7 @@
           <button id="solo" class="primary">Einzelspieler</button>
           <button id="create" class="primary">Mehrspieler-Lobby</button>
         </div>
+        <label class="inline">KI-Stärke<select id="sololevel"></select></label>
         <div class="small-note">Einzelspieler: du gegen KI-Teams. Mehrspieler: Raumlink an Kolleg:innen schicken (KI-Teams gehen auch).</div>
         <div class="or">oder Raumcode eingeben</div>
         <div class="row">
@@ -62,6 +63,9 @@
             <div id="addbotrow" class="row hidden">
               <select id="botlevel"></select>
               <button id="addbot">+ KI-Team</button>
+            </div>
+            <div id="allbotsrow" class="row hidden">
+              <select id="allbots"></select>
             </div>
             <h3>Pausenraum-Chat</h3>
             <div id="lobbychat"></div>

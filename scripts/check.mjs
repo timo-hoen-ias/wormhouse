@@ -4,7 +4,7 @@ import { WEAPONS, WEAPON_CATS, PROJECTILE_TYPES } from '../src/shared/weapons.js
 import { WORKER_R, WATER_Y, GRAVITY } from '../src/shared/constants.js';
 import { fallDamage } from '../src/shared/fall.js';
 import { sanitizeRules, defaultRules, ammoFromRules, configurableWeapons, AMMO_PRESETS } from '../src/shared/rules.js';
-import { planTurn, maskTerrain, LEVELS } from '../src/client/ai.js';
+import { planTurn, planMove, teleportSpot, maskTerrain, LEVELS } from '../src/client/ai.js';
 
 let fails = 0;
 const ok = (cond, msg) => { if (!cond) { fails++; console.error('✗', msg); } else console.log('✓', msg); };
@@ -64,6 +64,44 @@ for (const lvl of [1, 3]) {
   }
   const ms = (Date.now() - t0) / tries;
   ok(good / tries >= (lvl === 3 ? 0.6 : 0.3), `KI Stufe ${lvl}: findet in ${good}/${tries} Lagen einen Treffer (${ms.toFixed(0)} ms je Planung)`);
+}
+
+// KI: jede neue Waffe wird vom Planer auch wirklich eingesetzt
+{
+  const run = (it) => { let r; do { r = it.next(); } while (!r.done); return r.value; };
+  const setups = [];
+  for (const seed of [11, 222, 3333, 44444]) {
+    const mat = generateTerrain(seed);
+    const terrain = maskTerrain(mat);
+    const sp = findSpawns(mat, seed, 9);
+    for (let i = 0; i + 2 < sp.length; i += 3) {
+      const self = { id: 0, team: 0, x: sp[i][0], y: sp[i][1], hp: 100, dead: false };
+      const foe = { id: 1, team: 1, x: sp[i + 1][0], y: sp[i + 1][1], hp: 100, dead: false };
+      const foe2 = { id: 2, team: 1, x: sp[i + 2][0], y: sp[i + 2][1], hp: 60, dead: false };
+      setups.push({ terrain, mat, workers: [self, foe, foe2], self, wind: 0.3, waterY: WATER_Y, retreatTime: 3 });
+    }
+  }
+  for (const id of ['sendung', 'retoure', 'fass', 'tacker', 'stapler', 'drohne', 'tresor']) {
+    const good = setups.filter((ctx) => run(planTurn(ctx, { ...LEVELS[3], weapons: [id] }, () => -1))?.score > 0).length;
+    ok(good >= (['tacker', 'stapler'].includes(id) ? 1 : 2), `KI setzt ${id} ein (${good}/${setups.length} Lagen)`);
+  }
+  // Nahkampf & Gasflasche: Gegner steht direkt daneben
+  let melee = 0, gas = 0;
+  for (const ctx of setups) {
+    const foe = { ...ctx.workers[1], x: ctx.self.x + 18, y: ctx.self.y };
+    const c2 = { ...ctx, workers: [ctx.self, foe] };
+    if (run(planTurn(c2, { ...LEVELS[3], weapons: ['stempel'] }, () => -1))?.weapon === 'stempel') melee++;
+    const g = run(planTurn(c2, { ...LEVELS[3], weapons: ['gas'] }, () => -1));
+    if (g?.weapon === 'gas' && g.score > 0 && g.retreat) gas++;
+  }
+  ok(melee === setups.length, `KI haut mit dem Stempel zu (${melee}/${setups.length})`);
+  ok(gas >= 2, `KI stellt Gasflasche ab und läuft weg (${gas}/${setups.length})`);
+  const moves = setups.slice(0, 4).filter((ctx) => run(planMove(ctx, 3, () => -1))).length;
+  ok(moves >= 2, `KI findet Rucksack-Ziele (${moves}/4)`);
+  const tp = setups.map((ctx) => teleportSpot(ctx));
+  ok(tp.every((s, i) => s && isFree(setups[i].mat, s.x, s.y, WORKER_R + 1) && s.y < WATER_Y - 60), 'Inventurfehler-Ziele sind frei und trocken');
+  const lvlW = (n) => LEVELS[n].weapons.length + LEVELS[n].util.length;
+  ok(lvlW(1) < lvlW(2) && lvlW(2) < lvlW(3), 'Höhere KI-Stufen nutzen mehr vom Lager');
 }
 
 if (fails) { console.error(`${fails} Fehler`); process.exit(1); }

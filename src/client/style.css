@@ -72,6 +72,11 @@ button:disabled { opacity: 0.4; cursor: default; }
 .teambar .fill { height: 100%; transition: width 0.4s; }
 .teambar.off { opacity: 0.4; }
 .teambar.current .tname::after { content: ' ◀'; }
+.teambar .lvl { font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 8px; background: rgba(0,0,0,0.45); color: #ffd400; white-space: nowrap; }
+.teambar .lvl.edit { pointer-events: auto; cursor: pointer; border: 1px solid #ffd40088; }
+.teambar .lvl.edit:hover { background: #ffd400; color: #222; }
+label.inline { flex-direction: row; align-items: center; gap: 10px; margin: 2px 0 6px; }
+label.inline select { flex: 1; }
 #turninfo { text-align: center; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 6px 18px; min-width: 160px; }
 #turnname { font-size: 13px; font-weight: 700; }
 #timer { font-size: 30px; font-weight: 900; font-variant-numeric: tabular-nums; }
@@ -140,7 +145,7 @@ button:disabled { opacity: 0.4; cursor: default; }
 .swatch { width: 20px; height: 20px; padding: 0; border-radius: 50%; border: 2px solid transparent; }
 .swatch.sel { border-color: #fff; box-shadow: 0 0 0 2px #000 inset; }
 .swatch:disabled { opacity: 0.15; }
-#addbotrow select { flex: 1; min-width: 0; font-size: 13px; padding: 6px 8px; }
+#addbotrow select, #allbotsrow select { flex: 1; min-width: 0; font-size: 13px; padding: 6px 8px; }
 #lobbychat { height: 150px; overflow-y: auto; background: #0e1116; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font-size: 13px; margin-bottom: 6px; }
 #lobbychat div { margin: 2px 0; word-wrap: break-word; }
 #lobbychat .sys, #chatlog .sys { color: var(--muted); font-style: italic; }

@@ -74,9 +74,9 @@ export function ammoFromRules(rules) {
 // KI-Gegner
 export const BOT_LEVELS = [
   { level: 0, name: 'Dummy', desc: 'steht nur rum (Zielscheibe)' },
-  { level: 1, name: 'Azubi', desc: 'zielt grob, ignoriert den Wind' },
-  { level: 2, name: 'Fachkraft', desc: 'rechnet mit Wind, mehr Waffen' },
-  { level: 3, name: 'Lagermeister', desc: 'trifft fast immer, nutzt das ganze Lager' },
+  { level: 1, name: 'Azubi', desc: 'zielt grob, ignoriert den Wind, wenige Waffen' },
+  { level: 2, name: 'Fachkraft', desc: 'rechnet mit Wind, Stapler & Sendungsverfolgung, läuft nach dem Wurf weg' },
+  { level: 3, name: 'Lagermeister', desc: 'trifft fast immer, nutzt das ganze Lager inkl. Drohne, Tresor & Rucksack' },
 ];
 
 export const BOT_TEAM_NAMES = [

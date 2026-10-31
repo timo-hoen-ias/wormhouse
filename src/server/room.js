@@ -170,7 +170,7 @@ export class GameRoom extends DurableObject {
     s.game += 1;
     s.teams = [
       ...humans.map((p) => ({ pid: p.pid, bot: 0, name: p.team || p.name, color: p.color })),
-      ...bots.map((b) => ({ pid: null, bot: b.level, name: b.name, color: b.color })),
+      ...bots.map((b) => ({ pid: null, bot: b.level, botId: b.id ?? null, name: b.name, color: b.color })),
     ].map((t) => ({ ...t, ammo: ammoFromRules(r), nextWorker: 0 }));
     const names = [...WORKER_NAMES].sort(() => Math.random() - 0.5);
     s.workers = [];
@@ -328,7 +328,7 @@ export class GameRoom extends DurableObject {
           // Erster im (leeren) Raum legt fest, ob es ein Einzelspieler-Raum ist.
           s.solo = !!msg.solo;
           s.bots = [];
-          if (s.solo) this.addBot(2);
+          if (s.solo) this.addBot(Math.max(1, Math.min(BOT_LEVELS.length - 1, Math.round(num(msg.botLevel, 2)))));
         }
         let p = s.players.find((x) => x.pid === pid);
         let joined = false;
@@ -394,6 +394,20 @@ export class GameRoom extends DurableObject {
           if (msg.color && TEAM_COLORS.includes(msg.color)
             && ![...s.players, ...s.bots].some((x) => x !== b && x.color === msg.color)) b.color = msg.color;
         }
+        await this.save();
+        this.broadcastState();
+        break;
+      }
+
+      // KI-Stärke während der Schicht ändern (gilt ab dem nächsten Zug des Teams).
+      case 'botLevel': {
+        if (!this.isHost(att) || s.phase === 'lobby') return;
+        const t = s.teams[Math.round(num(msg.team, -1))];
+        if (!t || t.pid || !(t.bot > 0)) return;
+        t.bot = Math.max(1, Math.min(BOT_LEVELS.length - 1, Math.round(num(msg.level, t.bot))));
+        const b = s.bots.find((x) => x.id === t.botId);
+        if (b) b.level = t.bot;
+        this.sys(`🤖 ${t.name} spielt jetzt als ${BOT_LEVELS[t.bot].name}.`);
         await this.save();
         this.broadcastState();
         break;
