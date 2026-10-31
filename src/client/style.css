@@ -111,3 +111,44 @@ button:disabled { opacity: 0.4; cursor: default; }
   #wind, #turninfo { min-width: 100px; }
   .logo { font-size: 40px; }
 }
+
+/* Lobby */
+.panel.wide { width: min(980px, 100%); }
+.lobbyhead { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+.lobbyhead .roomcode { margin-bottom: 0; }
+.lobbygrid { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; margin-bottom: 14px; }
+@media (max-width: 760px) { .lobbygrid { grid-template-columns: 1fr; } }
+.lcol h3 { font-size: 13px; text-transform: uppercase; letter-spacing: 1.5px; color: var(--hazard); margin: 6px 0 8px; display: flex; gap: 8px; align-items: baseline; }
+.lcol h3 .tag { text-transform: none; letter-spacing: 0; color: var(--muted); font-weight: 400; }
+#teamlist { list-style: none; padding: 0; margin: 0 0 10px; }
+#teamlist li.team { padding: 8px 10px; border-radius: 8px; background: rgba(255,255,255,0.04); margin-bottom: 6px; border-left: 4px solid var(--team, #666); }
+#teamlist li.mine { background: rgba(255,196,0,0.07); }
+#teamlist li.empty { color: var(--muted); font-size: 12px; border-left-color: transparent; }
+.trow { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.trow .dot { width: 14px; height: 14px; border-radius: 50%; background: var(--team); flex: none; }
+.trow b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.trow input, .trow select { padding: 4px 8px; font-size: 14px; min-width: 0; }
+.trow input { flex: 1; }
+.trow .who { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.tag { font-size: 11px; color: var(--muted); white-space: nowrap; }
+.tag.host { color: var(--hazard); }
+.trow .ghost { margin-left: auto; background: transparent; border-color: transparent; color: var(--muted); }
+.swatches { display: flex; gap: 6px; margin: 8px 0 2px 22px; flex-wrap: wrap; }
+.swatch { width: 20px; height: 20px; padding: 0; border-radius: 50%; border: 2px solid transparent; }
+.swatch.sel { border-color: #fff; box-shadow: 0 0 0 2px #000 inset; }
+.swatch:disabled { opacity: 0.15; }
+#addbotrow select { flex: 1; min-width: 0; font-size: 13px; padding: 6px 8px; }
+#lobbychat { height: 150px; overflow-y: auto; background: #0e1116; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font-size: 13px; margin-bottom: 6px; }
+#lobbychat div { margin: 2px 0; word-wrap: break-word; }
+#lobbychat .sys, #chatlog .sys { color: var(--muted); font-style: italic; }
+#lobbychatinput { width: 100%; font-size: 14px; padding: 8px 10px; }
+#rules { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; }
+label.rule, label.ammo { margin: 0; gap: 3px; font-size: 12px; }
+label.rule select, label.ammo select { padding: 5px 8px; font-size: 14px; }
+.row.wrap { flex-wrap: wrap; gap: 6px; margin: 0 0 8px; }
+#ammo { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
+label.ammo span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
+label.ammo.off span { opacity: 0.45; text-decoration: line-through; }
+select:disabled { opacity: 0.75; }
+#hostcontrols { display: flex; }
+#sudden { position: absolute; top: 64px; right: 14px; background: #b71c1c; color: #fff; font-weight: 900; padding: 4px 10px; border-radius: 8px; font-size: 12px; animation: bob 0.6s infinite alternate; }

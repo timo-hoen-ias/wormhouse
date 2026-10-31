@@ -4,12 +4,42 @@ Rundenbasiertes Multiplayer-Artillery-Spiel im Stil der Worms-Klassiker: Teams a
 
 ## Spielen
 
-1. Seite öffnen, Namen eingeben, **„Neue Schicht starten“**.
-2. Den Raumlink (**„Link kopieren“**) an bis zu 3 Kolleg:innen schicken.
-3. Die Schichtleitung (wer den Raum erstellt hat) wählt die Arbeiter pro Team und startet.
-4. Allein? Dann geht es im Übungsmodus gegen die *Inventur-Dummies*.
+**Einzelspieler:** Namen eingeben, **„Einzelspieler“**. Du landest in deiner eigenen Lobby mit einem KI-Team, kannst weitere KI-Teams dazunehmen, Regeln einstellen und loslegen.
 
-Jedes Team zieht abwechselnd mit einem Arbeiter: **45 Sekunden** pro Zug, nach dem Schuss **3 Sekunden Rückzug**. Wer ins Hafenbecken fällt oder keine Lebenspunkte mehr hat, ist gekündigt. Das letzte Team mit Personal gewinnt.
+**Mehrspieler:** **„Mehrspieler-Lobby“** öffnen und den Raumlink (**„Link kopieren“**) an bis zu 5 Kolleg:innen schicken. In der Lobby (wie bei Worms):
+
+- Jede:r wählt **Teamname** und **Teamfarbe**, alle sehen sich gegenseitig.
+- **Pausenraum-Chat** vor dem Spiel (im Spiel weiter mit **T**), inkl. Verlauf für Nachzügler.
+- Die **Schichtleitung** (wer den Raum erstellt hat) stellt die **Spielregeln** ein, nimmt **KI-Teams** dazu und startet. Insgesamt bis zu 6 Teams.
+
+Das letzte Team mit Personal gewinnt. Allein und ohne KI-Gegner geht es gegen die *Inventur-Dummies* (Zielscheiben).
+
+### Spielregeln (Lobby)
+
+| Regel | Optionen (Standard fett) |
+|---|---|
+| Zugzeit | 15 / 20 / 30 / **45** / 60 / 90 s |
+| Rückzugszeit nach dem Schuss | keine / 2 / **3** / 5 s |
+| Arbeiter pro Team | 1 – 6 (**3**) |
+| Lebenspunkte | 50 / 75 / **100** / 150 / 200 |
+| Wind (Hallenlüftung) | aus / schwach / **normal** / stark |
+| Fallschaden | **an** / aus |
+| Sudden Death nach | nie / 3 / 5 / 10 / **15** / 20 / 30 min |
+| Sudden Death | **alle auf 1 HP + Hafenbecken steigt mit jedem Zug** / nur 1 HP |
+| Waffenlager | Munition pro Waffe: ∞ / aus / 1 / 2 / 3 / 5, Vorlagen „Standard“, „Volles Lager“, „Inventur knapp“ |
+
+Die Regeln sind in `src/shared/rules.js` als Optionslisten definiert; Lobby und Server lesen dieselbe Liste. Das Waffenlager wird aus `WEAPONS` erzeugt, neue Waffen erscheinen dort automatisch.
+
+### KI-Gegner
+
+| Stufe | Verhalten |
+|---|---|
+| 🤖 Dummy | steht nur rum (Zielscheibe, setzt aus) |
+| 🤖 Azubi | Paketkanone und Granate, zielt grob, ignoriert den Wind |
+| 🤖 Fachkraft | rechnet mit Wind, nutzt auch Kleinteile-Kiste, Scanner und Hubwagen |
+| 🤖 Lagermeister | trifft fast immer, nutzt zusätzlich den Paletten-Abwurf |
+
+Die KI (`src/client/ai.js`) läuft im Browser der Schichtleitung: Sie simuliert Flugbahnen mit derselben Physik wie das Spiel (Wind, springende Granaten, Laser-Sichtlinie, Luftschlag), bewertet Schaden an Gegnern gegen Eigentreffer, läuft notfalls ein Stück näher ran und bedient dann dieselbe Spiellogik wie ein Mensch. Für alle anderen sieht ein KI-Zug aus wie ein normaler Zug. Verlässt die Schichtleitung das Spiel, übernimmt der nächste Host die KI-Teams.
 
 ### Steuerung
 
@@ -55,7 +85,8 @@ Soundeffekte, prozedurale Hintergrundmusik (ruhig im Menü, Lagerfunk im Spiel, 
 
 ```
 index.html, src/client/   three.js-Client (Vite)
-  main.js                 Lobby, HUD, Eingaben, Hauptschleife
+  main.js                 Lobby (Teams, Regeln, Chat), HUD, Eingaben, Hauptschleife
+  ai.js                   KI-Gegner: Zugplanung + Steuerung
   game.js                 Zuglogik, Physik, Waffen, Netzwerk-Snapshots
   render.js               Szene: Lagerhalle, Arbeiter-Modelle, Effekte, Kamera
   terrain.js              zerstörbares Gelände (Bitmaske + Canvas-Textur)
@@ -63,12 +94,13 @@ index.html, src/client/   three.js-Client (Vite)
 src/shared/               Code für Client und Server
   terrain-gen.js          deterministischer Level-Generator (Seed)
   weapons.js, constants.js
+  rules.js                Spielregeln, Munitions-Vorlagen, KI-Stufen
 src/server/
   worker.js               Worker: /api/room/:code/ws -> Durable Object, sonst Static Assets
   room.js                 GameRoom (Durable Object, WebSocket Hibernation API)
 ```
 
-**Netzwerkmodell:** Der Durable Object ist Schiedsrichter für Lobby, Zugreihenfolge, Zeitlimit, Wind, Munition und Sieg. Den laufenden Zug simuliert der Browser des aktiven Spielers und streamt 20 Snapshots pro Sekunde, die der Raum an alle anderen weiterreicht. Jede Geländeänderung (Explosion, Kartonbrücke) wird als Operation im Raum gespeichert; zusammen mit dem Level-Seed kann so jeder Nachzügler oder Reconnect das Gelände exakt rekonstruieren. Bricht der aktive Spieler weg, beendet ein Alarm des Durable Objects den Zug.
+**Netzwerkmodell:** Der Durable Object ist Schiedsrichter für Lobby, Regeln, Zugreihenfolge, Zeitlimit, Wind, Munition und Sieg. Den laufenden Zug simuliert der Browser des aktiven Spielers und streamt 20 Snapshots pro Sekunde, die der Raum an alle anderen weiterreicht. Jede Geländeänderung (Explosion, Kartonbrücke) wird als Operation im Raum gespeichert; zusammen mit dem Level-Seed kann so jeder Nachzügler oder Reconnect das Gelände exakt rekonstruieren. Bricht der aktive Spieler weg, beendet ein Alarm des Durable Objects den Zug.
 
 ## Lokal entwickeln
 
@@ -106,4 +138,4 @@ Automatisch per GitHub Actions (`.github/workflows/deploy.yml`, bei jedem Push a
 
 ## Ideen für später
 
-Ninja-Seil (Spanngurt), Kisten-Drops mit Bonus-Waffen, Sudden Death (Hafenbecken steigt), Bots für den Übungsmodus, Touch-Steuerung, eigene Teamnamen und Mützen.
+Kisten-Drops mit Bonus-Waffen, Touch-Steuerung, eigene Mützen, KI für Stapler/Gasflasche/Seil.

@@ -18,6 +18,7 @@
       <div id="teams"></div>
       <div id="turninfo"><div id="turnname"></div><div id="timer">45</div></div>
       <div id="wind"><span>Wind</span><div class="windbar"><div class="windfill"></div></div></div>
+      <div id="sudden" class="hidden">🚨 SUDDEN DEATH</div>
     </div>
     <div id="weaponinfo"></div>
     <div id="weapons"></div>
@@ -32,14 +33,16 @@
 
   <!-- Startbildschirm -->
   <div id="menu" class="overlay">
-    <div class="panel">
+    <div class="panel" id="menupanel">
       <div class="logo">WORM<span>HOUSE</span></div>
       <div class="tagline">Lagerkoller im Hochregal</div>
       <div id="menu-join">
         <label>Dein Name<input id="name" maxlength="16" placeholder="z.B. Staplerfahrer Kalle" /></label>
         <div class="row">
-          <button id="create" class="primary">Neue Schicht starten</button>
+          <button id="solo" class="primary">Einzelspieler</button>
+          <button id="create" class="primary">Mehrspieler-Lobby</button>
         </div>
+        <div class="small-note">Einzelspieler: du gegen KI-Teams. Mehrspieler: Raumlink an Kolleg:innen schicken (KI-Teams gehen auch).</div>
         <div class="or">oder Raumcode eingeben</div>
         <div class="row">
           <input id="code" maxlength="8" placeholder="CODE" />
@@ -47,21 +50,40 @@
         </div>
       </div>
       <div id="menu-lobby" class="hidden">
-        <div class="roomcode">Raum <b id="roomcode"></b> <button id="copylink" class="small">Link kopieren</button></div>
-        <ul id="playerlist"></ul>
+        <div class="lobbyhead">
+          <div class="roomcode" id="roomline">Raum <b id="roomcode"></b> <button id="copylink" class="small">Link kopieren</button></div>
+          <div class="roomcode hidden" id="sololine">Einzelspieler · Übungsschicht</div>
+          <button id="leave" class="small">Verlassen</button>
+        </div>
+        <div class="lobbygrid">
+          <section class="lcol">
+            <h3>Teams</h3>
+            <ul id="teamlist"></ul>
+            <div id="addbotrow" class="row hidden">
+              <select id="botlevel"></select>
+              <button id="addbot">+ KI-Team</button>
+            </div>
+            <h3>Pausenraum-Chat</h3>
+            <div id="lobbychat"></div>
+            <input id="lobbychatinput" maxlength="140" placeholder="Nachricht … (Enter)" />
+          </section>
+          <section class="lcol">
+            <h3>Spielregeln <span id="rulesnote" class="tag"></span></h3>
+            <div id="rules"></div>
+            <h3>Waffenlager</h3>
+            <div id="presets" class="row wrap"></div>
+            <div id="ammo"></div>
+          </section>
+        </div>
         <div id="hostcontrols" class="hidden">
-          <label>Arbeiter pro Team
-            <select id="wpt"><option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option></select>
-          </label>
           <button id="start" class="primary">Schicht beginnen!</button>
-          <div class="small-note">Allein? Dann geht's gegen die Inventur-Dummies (Übungsmodus).</div>
         </div>
         <div id="waithost" class="small-note hidden">Warte, bis die Schichtleitung startet …</div>
       </div>
       <details class="help">
         <summary>Steuerung &amp; Arsenal</summary>
-        <p>Rundenbasiert wie früher: Jedes Team zieht abwechselnd mit einem Arbeiter. 45 Sekunden pro Zug, danach 3 Sekunden Rückzug. Wer ins Hafenbecken fällt, ist raus. Das letzte Team mit Personal gewinnt.</p>
-        <p><b>← →</b> laufen · <b>↑ ↓</b> zielen · <b>Leertaste</b> halten für Kraft, loslassen = Wurf · <b>Enter</b> Sprung · <b>⌫</b> Rückwärtssalto · <b>1–0, ß</b> Waffe wählen · <b>Klick</b> für Zielwaffen · <b>Mausrad</b> Zoom · <b>Ziehen</b> Kamera</p>
+        <p>Rundenbasiert wie früher: Jedes Team zieht abwechselnd mit einem Arbeiter. Zugzeit, Rückzug, Lebenspunkte, Wind, Fallschaden, Sudden Death und Munition stellt die Schichtleitung in der Lobby ein. Wer ins Hafenbecken fällt, ist raus. Das letzte Team mit Personal gewinnt.</p>
+        <p><b>← →</b> laufen · <b>↑ ↓</b> zielen · <b>Leertaste</b> halten für Kraft, loslassen = Wurf · <b>Enter</b> Sprung · <b>⌫</b> Rückwärtssalto · <b>1–0, ß</b> Waffe wählen · <b>Klick</b> für Zielwaffen · <b>Mausrad</b> Zoom · <b>Ziehen</b> Kamera · <b>T</b> Chat</p>
         <ul id="arsenal"></ul>
       </details>
     </div>
