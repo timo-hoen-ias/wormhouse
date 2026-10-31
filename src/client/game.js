@@ -7,11 +7,11 @@ import {
 import { WEAPON_BY_ID, PROJECTILE_TYPES } from '../shared/weapons.js';
 import { findSpawns, isFree } from '../shared/terrain-gen.js';
 import { Terrain } from './terrain.js';
-import { sfx } from './audio.js';
+import { fallDamage } from '../shared/fall.js';
+import { sfx, setLoop } from './audio.js';
 
 const STEP = 1 / 60;
 const WIND_ACC = 160;
-const FALL_SAFE_SPEED = 560;
 const SNAP_INTERVAL = 50;
 
 const r1 = (v) => Math.round(v * 10) / 10;
@@ -51,6 +51,8 @@ export class Game {
     this.manualCam = false;
     this.remote = { weapon: null, charge: 0 };
     this.walker = null;
+    this.graves = [];
+    this.lastFuse = new Map();
   }
 
   // ---------- Hilfen ----------
@@ -90,6 +92,7 @@ export class Game {
     if (state.phase === 'lobby') {
       this.myTurn = false;
       this.tp = 'wait';
+      this.stopLoops();
       return;
     }
 
@@ -105,6 +108,9 @@ export class Game {
       this.myTurn = false;
       this.tp = 'wait';
       this.projectiles = [];
+      this.stopLoops();
+      const mine = this.myTeamIndex();
+      if (mine >= 0 && state.winner !== mine) sfx.lose(); else sfx.win();
     }
   }
 
@@ -122,7 +128,9 @@ export class Game {
       facing: (sw.x ?? spawns[i][0]) < W / 2 ? 1 : -1, aim: -0.4,
       grounded: false, walking: false, still: 0,
       shownHp: sw.hp, shownDead: sw.dead,
+      airTop: null, stepT: 0, stepAlt: false,
     }));
+    this.graves = [];
     for (const w of this.workers) { w.rx = w.x; w.ry = w.y; }
     this.projectiles = [];
     this.turnN = -1;
@@ -216,7 +224,7 @@ export class Game {
       w.x = a[1]; w.y = a[2]; w.hp = a[3]; w.dead = !!a[4];
       w.facing = a[5]; w.aim = a[6]; w.walking = !!a[7]; w.grounded = !!a[8];
     }
-    this.projectiles = msg.p.map((a) => ({ type: PROJECTILE_TYPES[a[0]], x: a[1], y: a[2], rot: a[3], facing: a[4] }));
+    this.projectiles = msg.p.map((a) => ({ type: PROJECTILE_TYPES[a[0]], x: a[1], y: a[2], rot: a[3], facing: a[4], fuse: a[5] ?? null }));
     this.remote.weapon = msg.wp;
     this.remote.charge = msg.ch;
     this.remote.aiming = !!msg.am;
@@ -235,6 +243,15 @@ export class Game {
       case 'splash': this.renderer.splash(f.x); sfx.splash(); break;
       case 'sfx': sfx[f.s]?.(); break;
       case 'msg': this.ui.toast(f.text, f.color); break;
+      case 'anim': this.renderer.workerAnim(f.id, f.a); break;
+      case 'fall': {
+        // Harte Landung: Staub, Schwindel, „Autsch!“
+        this.renderer.dust(f.x, f.y + WORKER_R, Math.min(2, 0.6 + f.d / 25));
+        this.renderer.workerLand(f.id, true);
+        this.renderer.floatText(f.x, f.y - 45, f.d >= 30 ? 'AUTSCH!!' : 'Autsch!', '#ffb74d');
+        sfx.oof();
+        break;
+      }
     }
   }
 
@@ -281,7 +298,7 @@ export class Game {
     } else if (code === 'Enter' && this.canAct() && w.grounded) {
       w.vx = w.facing * 160; w.vy = -250; w.grounded = false; this.fx({ k: 'sfx', s: 'jump' });
     } else if (code === 'Backspace' && this.canAct() && w.grounded) {
-      w.vx = -w.facing * 70; w.vy = -390; w.grounded = false; this.fx({ k: 'sfx', s: 'jump' });
+      w.vx = -w.facing * 70; w.vy = -390; w.grounded = false; this.fx({ k: 'sfx', s: 'jump' }); this.fx({ k: 'anim', id: w.id, a: 'flip' });
     } else if (code === 'Tab') {
       // nichts – reserviert
     }
@@ -325,15 +342,77 @@ export class Game {
       w.ry += (w.y - w.ry) * k;
       if (w.hp < w.shownHp) {
         this.renderer.floatText(w.x, w.y, `-${Math.round(w.shownHp - w.hp)}`, this.teams[w.team]?.color || '#fff');
+        this.renderer.workerHurt(w.id);
+        if (!w.dead) sfx.ouch();
       }
       w.shownHp = w.hp;
       if (w.dead && !w.shownDead) {
         this.renderer.puff(w.x, w.y, '#ffffff');
-        if (w.y < WATER_Y) this.renderer.explosion(w.x, w.y, 14);
+        if (w.y < WATER_Y) {
+          this.renderer.explosion(w.x, w.y, 14);
+          this.graves.push({ id: w.id, team: w.team, x: w.x, y: w.y, vy: 0, tilt: (Math.random() - 0.5) * 0.3 });
+        }
         this.ui.toast(`${w.name} wurde gekündigt!`, this.teams[w.team]?.color);
+        sfx.death();
       }
       w.shownDead = w.dead;
+      if (!w.dead) this.trackMotion(w, dt);
     }
+    this.updateGraves(dt);
+    this.updateLoops();
+  }
+
+  // Landungen und Schritte aus der dargestellten Bewegung ableiten –
+  // so hören und sehen auch Zuschauer alles, ohne zusätzliche Netzwerknachrichten.
+  trackMotion(w, dt) {
+    if (!w.grounded) {
+      w.airTop = w.airTop == null ? w.y : Math.min(w.airTop, w.y);
+      w.stepT = 0;
+    } else if (w.airTop != null) {
+      const fell = w.y - w.airTop;
+      w.airTop = null;
+      if (fell > 14) {
+        this.renderer.workerLand(w.id, false);
+        if (fell > 40) this.renderer.dust(w.x, w.y + WORKER_R, 0.3);
+        sfx.land();
+      }
+    }
+    if (w.walking && w.grounded) {
+      w.stepT -= dt;
+      if (w.stepT <= 0) { w.stepT = 0.17; w.stepAlt = !w.stepAlt; sfx.step(w.stepAlt); }
+    } else {
+      w.stepT = 0;
+    }
+  }
+
+  // Grabsteine fallen mit, wenn das Gelände darunter weggesprengt wird.
+  updateGraves(dt) {
+    if (!this.graves.length) return;
+    for (const g of this.graves) {
+      if (this.terrain.hitsCircle(g.x, g.y + 1, 6)) { g.vy = 0; continue; }
+      g.vy = Math.min(900, g.vy + GRAVITY * dt);
+      const steps = Math.max(1, Math.ceil((g.vy * dt) / 2));
+      for (let i = 0; i < steps; i++) {
+        if (this.terrain.hitsCircle(g.x, g.y + 1, 6)) { g.vy = 0; break; }
+        g.y += (g.vy * dt) / steps;
+      }
+      if (g.y > WATER_Y + 8) { g.sunk = true; this.renderer.splash(g.x); }
+    }
+    this.graves = this.graves.filter((g) => !g.sunk);
+  }
+
+  // Dauergeräusche: Stapler-Motor, zischende Gasflasche, Aufladeton
+  updateLoops() {
+    const playing = this.state?.phase === 'playing';
+    setLoop('engine', playing && this.projectiles.some((p) => p.type === 'stapler' && !p.dead));
+    const gas = playing && this.projectiles.find((p) => p.type === 'gas' && !p.dead);
+    setLoop('hiss', !!gas, gas && gas.fuse != null ? Math.max(0, 1 - gas.fuse / 5) : 0);
+    const charge = this.myTurn ? (this.charging ? this.charge : 0) : (this.remote.aiming ? this.remote.charge : 0);
+    setLoop('charge', playing && charge > 0, charge);
+  }
+
+  stopLoops() {
+    setLoop('engine', false); setLoop('hiss', false); setLoop('charge', false);
   }
 
   simStep(dt) {
@@ -444,9 +523,8 @@ export class Game {
     w.vy += GRAVITY * dt;
     const res = this.moveCircle(w, dt, WORKER_R, 0.3);
     if (res) {
-      if (res.impact > FALL_SAFE_SPEED) {
-        this.damage(w, Math.min(40, Math.round((res.impact - FALL_SAFE_SPEED) / 9)));
-      }
+      const dmg = fallDamage(res.impact);
+      if (dmg > 0 && res.n.y < -0.3) this.fallHurt(w, dmg);
       if (res.n.y < -0.55 && Math.hypot(w.vx, w.vy) < 130) {
         w.grounded = true; w.vx = 0; w.vy = 0;
       }
@@ -454,6 +532,18 @@ export class Game {
     w.still = Math.hypot(w.x - ox, w.y - oy) < 0.3 ? w.still + dt : 0;
     if (w.still > 0.4 && this.isGrounded(w, WORKER_R)) { w.grounded = true; w.vx = 0; w.vy = 0; }
     if (w.y > WATER_Y + 4) this.drown(w);
+  }
+
+  fallHurt(w, dmg) {
+    if (w.dead) return;
+    this.damage(w, dmg);
+    this.fx({ k: 'fall', id: w.id, x: r1(w.x), y: r1(w.y), d: dmg });
+    // Wie im Original: Wer sich beim eigenen Zug verletzt, beendet ihn sofort.
+    if (w === this.activeWorker() && (this.tp === 'aim' || this.tp === 'retreat')) {
+      this.charging = false;
+      this.tp = 'resolve';
+      if (!w.dead) this.fx({ k: 'msg', text: `${w.name} hat sich verhoben – Zug vorbei!`, color: '#ffb74d' });
+    }
   }
 
   drown(w) {
@@ -487,15 +577,18 @@ export class Game {
         const sp = 120 + power * 900;
         this.projectiles.push({ type: wpn.id, wpn, x: sx, y: sy, vx: dir.x * sp, vy: dir.y * sp, r: 3, rot: 0, facing: 1, age: 0 });
         this.fx({ k: 'sfx', s: 'shoot' });
+        this.fx({ k: 'anim', id: w.id, a: 'shoot' });
         break;
       }
       case 'grenade': {
         const sp = 100 + power * 650;
         this.projectiles.push({ type: wpn.id, wpn, x: sx, y: sy, vx: dir.x * sp, vy: dir.y * sp, r: 4, rot: 0, facing: w.facing, fuse: wpn.fuse, age: 0 });
-        this.fx({ k: 'sfx', s: 'jump' });
+        this.fx({ k: 'sfx', s: 'throw' });
+        this.fx({ k: 'anim', id: w.id, a: 'throw' });
         break;
       }
       case 'hitscan': {
+        this.fx({ k: 'anim', id: w.id, a: 'shoot' });
         this.scan(w, sx, sy, dir, wpn);
         this.shotsLeft -= 1;
         if (this.shotsLeft > 0) {
@@ -516,7 +609,9 @@ export class Game {
           }
         }
         this.fx({ k: 'puff', x: w.x + w.facing * 18, y: w.y, c: '#ffcc80' });
-        this.fx({ k: 'sfx', s: hit ? 'bonk' : 'thud' });
+        this.fx({ k: 'anim', id: w.id, a: 'swing' });
+        this.fx({ k: 'sfx', s: 'swing' });
+        if (hit) this.fx({ k: 'sfx', s: 'bonk' });
         break;
       }
       case 'walker': {
@@ -524,11 +619,13 @@ export class Game {
         this.projectiles.push(p);
         this.walker = p;
         this.fx({ k: 'sfx', s: 'engine' });
+        this.fx({ k: 'anim', id: w.id, a: 'drop' });
         break;
       }
       case 'drop': {
         this.projectiles.push({ type: 'gas', wpn, x: w.x + w.facing * 12, y: w.y - 4, vx: w.facing * 40, vy: -60, r: 5, rot: 0, facing: 1, fuse: wpn.fuse, age: 0 });
         this.fx({ k: 'sfx', s: 'thud' });
+        this.fx({ k: 'anim', id: w.id, a: 'drop' });
         break;
       }
       case 'airstrike': {
@@ -537,6 +634,9 @@ export class Game {
           this.projectiles.push({ type: 'palette', wpn, x: target.x + (i - (wpn.count - 1) / 2) * 34, y: -40 - i * 25, vx: 0, vy: 200, r: 5, rot: 0, facing: 1, age: 0, wind: true });
         }
         this.fx({ k: 'msg', text: 'Achtung, Kranarbeiten!', color: '#ffd400' });
+        this.fx({ k: 'anim', id: w.id, a: 'radio' });
+        this.fx({ k: 'sfx', s: 'crane' });
+        this.fx({ k: 'sfx', s: 'whistle' });
         break;
       }
       case 'teleport': {
@@ -546,6 +646,7 @@ export class Game {
           return;
         }
         this.fx({ k: 'puff', x: w.x, y: w.y, c: '#b388ff' });
+        this.fx({ k: 'anim', id: w.id, a: 'tele' });
         w.x = target.x; w.y = target.y; w.vx = 0; w.vy = 0; w.grounded = false;
         this.fx({ k: 'puff', x: w.x, y: w.y, c: '#b388ff' });
         this.fx({ k: 'sfx', s: 'teleport' });
@@ -560,10 +661,13 @@ export class Game {
         }
         this.sendOp({ k: 'girder', x: r1(target.x), y: r1(target.y), a: Math.round(this.girderAngle * 1000) / 1000 });
         this.fx({ k: 'sfx', s: 'build' });
+        this.fx({ k: 'anim', id: w.id, a: 'build' });
         break;
       }
       case 'skip': {
         this.fx({ k: 'msg', text: `${w.name} macht Kaffeepause. ☕`, color: '#a1887f' });
+        this.fx({ k: 'anim', id: w.id, a: 'coffee' });
+        this.fx({ k: 'sfx', s: 'slurp' });
         endTurnNow = true;
         break;
       }
@@ -678,15 +782,15 @@ export class Game {
       case 'gas': {
         p.vy += GRAVITY * dt;
         const res = this.moveCircle(p, dt, p.r, p.wpn.bounce ?? 0.25);
-        if (res && res.impact > 60) this.fx({ k: 'sfx', s: 'thud' });
+        if (res && res.impact > 60) this.fx({ k: 'sfx', s: p.type === 'gas' ? 'thud' : 'bounce' });
         if (p.type === 'gas' && res) { p.vx *= 0.85; }
         p.rot += p.vx * dt * 0.08;
-        p.fuse -= dt;
+        this.fuseTick(p, dt);
         if (p.fuse <= 0) this.explodeProjectile(p);
         break;
       }
       case 'stapler': {
-        p.fuse -= dt;
+        this.fuseTick(p, dt);
         if (p.fuse <= 0 || (p.age > 0.5 && this.hitsWorker(p, 4))) { this.explodeProjectile(p); break; }
         if (p.grounded) {
           if (!this.terrain.hitsCircle(p.x, p.y + 1.5, p.r)) { p.grounded = false; break; }
@@ -713,7 +817,6 @@ export class Game {
           const res = this.moveCircle(p, dt, p.r, 0.1);
           if (res && res.n.y < -0.5) { p.grounded = true; p.vx = 0; p.vy = 0; }
         }
-        if (Math.random() < 0.02) this.fx({ k: 'sfx', s: 'engine' });
         break;
       }
     }
@@ -723,6 +826,12 @@ export class Game {
     }
   }
 
+  fuseTick(p, dt) {
+    const before = Math.ceil(p.fuse);
+    p.fuse -= dt;
+    if (Math.ceil(p.fuse) !== before && p.fuse > 0) this.fx({ k: 'sfx', s: 'fuse' });
+  }
+
   // ---------- Netzwerk ----------
   sendSnap() {
     const w = this.activeWorker();
@@ -730,7 +839,7 @@ export class Game {
       t: 'snap',
       n: this.turnN,
       w: this.workers.map((x) => [x.id, r1(x.x), r1(x.y), x.hp, x.dead ? 1 : 0, x.facing, Math.round(x.aim * 100) / 100, x.walking ? 1 : 0, x.grounded ? 1 : 0]),
-      p: this.projectiles.filter((p) => !p.dead).map((p) => [PROJECTILE_TYPES.indexOf(p.type), r1(p.x), r1(p.y), Math.round(p.rot * 100) / 100, p.facing]),
+      p: this.projectiles.filter((p) => !p.dead).map((p) => [PROJECTILE_TYPES.indexOf(p.type), r1(p.x), r1(p.y), Math.round(p.rot * 100) / 100, p.facing, p.fuse != null ? r1(p.fuse) : null]),
       wp: this.weapon,
       ch: Math.round(this.charge * 100) / 100,
       am: this.tp === 'aim' && w && !w.dead ? 1 : 0,
@@ -765,12 +874,15 @@ export class Game {
   render(dt) {
     if (!this.terrain || !this.state || this.state.phase === 'lobby') return;
     const active = this.activeWorker();
-    this.renderer.syncWorkers(this.workers, this.teams, this.state.phase === 'playing' ? active?.id : -1);
-    this.renderer.setProjectiles(this.projectiles.filter((p) => !p.dead));
-
     const wpnId = this.myTurn ? this.weapon : this.remote.weapon;
     const wpn = WEAPON_BY_ID[wpnId] || WEAPON_BY_ID.paket;
     const aiming = this.myTurn ? this.tp === 'aim' : this.remote.aiming;
+    const playing = this.state.phase === 'playing';
+    const held = playing && aiming ? { id: wpn.id, aimArm: ['projectile', 'grenade', 'hitscan'].includes(wpn.kind) } : null;
+    const charge = this.myTurn ? this.charge : this.remote.charge;
+    this.renderer.syncWorkers(this.workers, this.teams, playing ? active?.id : -1, held, aiming ? charge : 0, dt);
+    this.renderer.setProjectiles(this.projectiles.filter((p) => !p.dead), dt);
+    this.renderer.syncGraves(this.graves, this.teams);
     const showAim = !!active && !active.dead && aiming && !wpn.target && ['projectile', 'grenade', 'hitscan'].includes(wpn.kind);
     if (active) {
       this.renderer.showAim({ x: active.rx ?? active.x, y: active.ry ?? active.y }, active.aim, active.facing, this.myTurn ? this.charge : this.remote.charge, showAim);

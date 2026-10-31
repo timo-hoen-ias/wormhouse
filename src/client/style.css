@@ -96,7 +96,13 @@ button:disabled { opacity: 0.4; cursor: default; }
 #chatlog div { margin: 1px 0; }
 #chatinput { width: 100%; padding: 6px 8px; font-size: 12px; opacity: 0.6; }
 #chatinput:focus { opacity: 1; }
-#mute { position: absolute; right: 10px; bottom: 10px; padding: 6px 10px; }
+#audioctl { position: fixed; right: 10px; bottom: 10px; display: flex; gap: 6px; z-index: 25; }
+#audioctl button { padding: 6px 10px; }
+#audioctl button.off { opacity: 0.45; }
+.fuse { position: absolute; left: 0; top: 0; font-weight: 900; font-size: 13px; color: #fff; background: rgba(0,0,0,0.6);
+  border: 1px solid #ffd400; border-radius: 10px; padding: 0 6px; pointer-events: none; }
+.fuse.hot { color: #ff5252; border-color: #ff5252; animation: fusepulse 0.25s infinite alternate; }
+@keyframes fusepulse { from { scale: 1; } to { scale: 1.25; } }
 #conn { position: fixed; top: 10px; left: 50%; transform: translateX(-50%); background: #b71c1c; padding: 8px 16px; border-radius: 8px; z-index: 30; font-weight: 700; }
 
 @media (max-width: 900px) {

@@ -41,6 +41,16 @@ Jedes Team zieht abwechselnd mit einem Arbeiter: **45 Sekunden** pro Zug, nach d
 | 🧱 | Kartonbrücke | baut einen Träger aus Karton | 3 |
 | ☕ | Kaffeepause | Zug aussetzen | ∞ |
 
+### Fallschaden
+
+Wer tiefer als ca. 160 px (≈ 8 Arbeiter) fällt, verletzt sich: 1 HP pro 9 px/s Aufprallgeschwindigkeit über der Grenze, höchstens 50 HP. Verletzt sich der aktive Arbeiter während seines Zugs, ist der Zug sofort vorbei. Harte Landungen zeigen Staub, Schwindel-Sternchen und ein „Autsch!“.
+
+### Ton
+
+Alles wird live im Browser synthetisiert (WebAudio), es gibt keine Audiodateien:
+Soundeffekte, prozedurale Hintergrundmusik (ruhig im Menü, Lagerfunk im Spiel, Melodien werden immer neu erzeugt) und Lagerhallen-Atmosphäre (Raumhall, Neonröhren, Hafenwasser, Rückfahrwarner, vorbeifahrende Stapler, Durchsagen, Möwen).
+🎵 schaltet Musik + Atmosphäre, 🔊 den gesamten Ton. Die Einstellung wird gespeichert.
+
 ## Technik
 
 ```
@@ -49,7 +59,7 @@ index.html, src/client/   three.js-Client (Vite)
   game.js                 Zuglogik, Physik, Waffen, Netzwerk-Snapshots
   render.js               Szene: Lagerhalle, Arbeiter-Modelle, Effekte, Kamera
   terrain.js              zerstörbares Gelände (Bitmaske + Canvas-Textur)
-  audio.js                synthetische Soundeffekte (WebAudio, keine Assets)
+  audio.js                Soundeffekte, Musik-Sequencer, Hallen-Atmosphäre (WebAudio, keine Assets)
 src/shared/               Code für Client und Server
   terrain-gen.js          deterministischer Level-Generator (Seed)
   weapons.js, constants.js
