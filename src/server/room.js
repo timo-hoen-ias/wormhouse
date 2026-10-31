@@ -1,27 +1,40 @@
 // Ein Spielraum = ein Durable Object.
-// Der Server ist Schiedsrichter für Lobby, Zugreihenfolge, Zeitlimit, Munition
-// und Sieg. Die Physik eines Zuges simuliert der Client des aktiven Spielers
-// und streamt Snapshots; Geländeänderungen werden als Operationen gespeichert,
-// damit Nachzügler und Reconnects das Level exakt rekonstruieren können.
+// Der Server ist Schiedsrichter für Lobby, Regeln, Zugreihenfolge, Zeitlimit,
+// Munition, Sudden Death und Sieg. Die Physik eines Zuges simuliert der Client
+// des aktiven Spielers und streamt Snapshots; KI-Teams werden vom Client der
+// Schichtleitung (Host) gesteuert. Geländeänderungen werden als Operationen
+// gespeichert, damit Nachzügler und Reconnects das Level exakt rekonstruieren.
 import { DurableObject } from 'cloudflare:workers';
 import {
-  TURN_TIME, TURN_GRACE_MS, MAX_HP, MAX_PLAYERS, TEAM_COLORS, WORKER_NAMES, BOT_TEAM_NAME,
+  TURN_GRACE_MS, MAX_PLAYERS, TEAM_COLORS, WORKER_NAMES, WATER_Y,
 } from '../shared/constants.js';
-import { initialAmmo, WEAPON_BY_ID } from '../shared/weapons.js';
+import { WEAPON_BY_ID } from '../shared/weapons.js';
+import {
+  defaultRules, sanitizeRules, ammoFromRules, BOT_LEVELS, BOT_TEAM_NAMES, MAX_TEAMS,
+  SUDDEN_WATER_STEP, MIN_WATER_Y,
+} from '../shared/rules.js';
+
+const CHAT_KEEP = 40;
 
 function freshState() {
   return {
     phase: 'lobby', // lobby | playing | ended
     hostPid: null,
-    players: [], // {pid, name, color, connected}
-    workersPerTeam: 3,
+    solo: false, // Einzelspieler-Raum: niemand sonst kann mitspielen
+    players: [], // {pid, name, team, color, connected}
+    bots: [], // {id, name, color, level}
+    rules: defaultRules(),
     seed: 0,
-    teams: [], // {pid|null, name, color, ammo, nextWorker}
+    teams: [], // {pid|null, bot (Stufe, 0 = keiner), name, color, ammo, nextWorker}
     workers: [], // {id, team, name, x, y, hp, dead}
     turn: null, // {n, team, worker, wind, endsAt}
     ops: [],
     winner: null,
     game: 0,
+    startedAt: 0,
+    sudden: false,
+    waterY: WATER_Y,
+    chat: [],
   };
 }
 
@@ -35,7 +48,8 @@ export class GameRoom extends DurableObject {
     this.lastSnapWorkers = null;
     ctx.blockConcurrencyWhile(async () => {
       const saved = await ctx.storage.get('state');
-      if (saved) this.s = saved;
+      // Ältere Spielstände um neue Felder ergänzen.
+      if (saved) this.s = { ...freshState(), ...saved, rules: sanitizeRules(saved.rules) };
       // Nach einem Neustart des Objekts gilt erstmal niemand als verbunden,
       // bis seine Sockets sich wieder melden.
       const live = new Set(ctx.getWebSockets().map((ws) => ws.deserializeAttachment()?.pid));
@@ -61,6 +75,7 @@ export class GameRoom extends DurableObject {
     return {
       ...s,
       ops: undefined,
+      chat: undefined,
       opCount: s.ops.length,
       turnMsLeft: s.turn ? Math.max(0, s.turn.endsAt - Date.now()) : 0,
     };
@@ -81,51 +96,99 @@ export class GameRoom extends DurableObject {
     this.broadcast({ t: 'state', state: this.publicState() });
   }
 
+  chat(entry) {
+    const s = this.s;
+    s.chat.push(entry);
+    if (s.chat.length > CHAT_KEEP) s.chat.splice(0, s.chat.length - CHAT_KEEP);
+    this.broadcast({ t: 'chat', ...entry });
+  }
+
+  sys(text) {
+    this.chat({ sys: true, text });
+  }
+
+  // Wer simuliert den laufenden Zug? Menschen sich selbst, KI-Teams die Schichtleitung.
+  controllerOf(team) {
+    if (!team) return null;
+    if (team.pid) return team.pid;
+    return team.bot > 0 ? this.s.hostPid : null;
+  }
+
   activePid() {
     const s = this.s;
     if (s.phase !== 'playing' || !s.turn) return null;
-    return s.teams[s.turn.team]?.pid ?? null;
+    return this.controllerOf(s.teams[s.turn.team]);
   }
 
   isActive(att) {
     return !!att.pid && att.pid === this.activePid();
   }
 
+  isHost(att) {
+    return !!att.pid && att.pid === this.s.hostPid;
+  }
+
   teamAlive(i) {
     return this.s.workers.some((w) => w.team === i && !w.dead);
   }
 
+  teamCount() {
+    return this.s.players.length + this.s.bots.length;
+  }
+
+  freeColor(except = null) {
+    const used = new Set([...this.s.players, ...this.s.bots].filter((x) => x !== except).map((x) => x.color));
+    return TEAM_COLORS.find((c) => !used.has(c)) || '#ffffff';
+  }
+
+  addBot(level = 2) {
+    const s = this.s;
+    if (s.phase !== 'lobby' || this.teamCount() >= MAX_TEAMS) return false;
+    const usedNames = new Set([...s.players.map((p) => p.team), ...s.bots.map((b) => b.name)]);
+    // „Inventur-Dummies“ bleibt den reinen Zielscheiben vorbehalten.
+    const pool = level === 0 ? BOT_TEAM_NAMES : BOT_TEAM_NAMES.slice(1);
+    const name = pool.find((n) => !usedNames.has(n)) || `KI-Team ${s.bots.length + 1}`;
+    s.bots.push({ id: crypto.randomUUID().slice(0, 8), name, color: this.freeColor(), level });
+    return true;
+  }
+
   // ---------- Spielablauf ----------
-  startGame(workersPerTeam) {
+  startGame() {
     const s = this.s;
     const humans = s.players.filter((p) => p.connected);
-    if (!humans.length) return;
-    s.workersPerTeam = Math.max(1, Math.min(5, Math.round(num(workersPerTeam, 3))));
+    if (!humans.length) return false;
+    const r = s.rules;
+    const bots = [...s.bots];
+    if (humans.length + bots.length < 2) {
+      // Allein ohne Gegner: Zielscheiben aufstellen (Übungsmodus).
+      bots.push({ name: BOT_TEAM_NAMES[0], color: '#9e9e9e', level: 0 });
+    }
     s.seed = (Math.random() * 2 ** 31) >>> 0;
     s.game += 1;
-    s.teams = humans.map((p) => ({
-      pid: p.pid, name: p.name, color: p.color, ammo: initialAmmo(), nextWorker: 0,
-    }));
-    if (s.teams.length === 1) {
-      // Übungsmodus: Zielscheiben, die nie am Zug sind.
-      s.teams.push({ pid: null, name: BOT_TEAM_NAME, color: '#9e9e9e', ammo: initialAmmo(), nextWorker: 0 });
-    }
+    s.teams = [
+      ...humans.map((p) => ({ pid: p.pid, bot: 0, name: p.team || p.name, color: p.color })),
+      ...bots.map((b) => ({ pid: null, bot: b.level, name: b.name, color: b.color })),
+    ].map((t) => ({ ...t, ammo: ammoFromRules(r), nextWorker: 0 }));
     const names = [...WORKER_NAMES].sort(() => Math.random() - 0.5);
     s.workers = [];
     let id = 0;
     // Abwechselnd zuteilen, damit die Spawn-Reihenfolge fair gemischt ist.
-    for (let k = 0; k < s.workersPerTeam; k++) {
+    for (let k = 0; k < r.workersPerTeam; k++) {
       for (let t = 0; t < s.teams.length; t++) {
-        s.workers.push({ id: id, team: t, name: names[id % names.length], x: null, y: null, hp: MAX_HP, dead: false });
+        s.workers.push({ id, team: t, name: names[id % names.length], x: null, y: null, hp: r.hp, dead: false });
         id++;
       }
     }
     s.ops = [];
     s.winner = null;
+    s.sudden = false;
+    s.waterY = WATER_Y;
+    s.startedAt = Date.now();
     s.phase = 'playing';
-    s.turn = { n: 0, team: Math.floor(Math.random() * humans.length), worker: -1, wind: 0, endsAt: 0 };
-    s.turn.team = (s.turn.team + s.teams.length - 1) % s.teams.length; // advanceTurn geht eins weiter
-    this.advanceTurn(true);
+    const first = Math.floor(Math.random() * s.teams.length);
+    s.turn = { n: 0, team: (first + s.teams.length - 1) % s.teams.length, worker: -1, wind: 0, endsAt: 0 };
+    this.advanceTurn(true); // geht eins weiter
+    return true;
   }
 
   pickWorker(teamIdx) {
@@ -142,9 +205,29 @@ export class GameRoom extends DurableObject {
     return -1;
   }
 
+  // Sudden Death: alle auf 1 HP, danach steigt das Hafenbecken mit jedem Zug.
+  suddenDeathTick(first) {
+    const s = this.s;
+    const r = s.rules;
+    if (first || !r.suddenDeath) return;
+    if (!s.sudden && Date.now() >= s.startedAt + r.suddenDeath * 60000) {
+      s.sudden = true;
+      for (const w of s.workers) if (!w.dead) w.hp = 1;
+      this.sys('🚨 SUDDEN DEATH! Alle Arbeiter auf 1 HP' + (r.suddenWater ? ' – und das Hafenbecken läuft voll!' : '!'));
+      return;
+    }
+    if (s.sudden && r.suddenWater) {
+      s.waterY = Math.max(MIN_WATER_Y, s.waterY - SUDDEN_WATER_STEP);
+      for (const w of s.workers) {
+        if (!w.dead && w.y != null && w.y > s.waterY + 4) { w.dead = true; w.hp = 0; }
+      }
+    }
+  }
+
   advanceTurn(first = false) {
     const s = this.s;
     this.lastSnapWorkers = null;
+    this.suddenDeathTick(first);
     const alive = s.teams.map((_, i) => this.teamAlive(i));
     const aliveCount = alive.filter(Boolean).length;
     if (!first && aliveCount <= 1) {
@@ -158,8 +241,8 @@ export class GameRoom extends DurableObject {
     let next = -1;
     for (let k = 1; k <= s.teams.length; k++) {
       const i = (s.turn.team + k) % s.teams.length;
-      const t = s.teams[i];
-      if (t.pid && alive[i] && connected.has(t.pid)) { next = i; break; }
+      const c = this.controllerOf(s.teams[i]);
+      if (c && alive[i] && connected.has(c)) { next = i; break; }
     }
     if (next < 0) {
       // Keiner da, der ziehen kann: Zug bleibt stehen, bis jemand zurückkommt.
@@ -169,8 +252,8 @@ export class GameRoom extends DurableObject {
       n: s.turn.n + 1,
       team: next,
       worker: this.pickWorker(next),
-      wind: Math.round((Math.random() * 2 - 1) * 100) / 100,
-      endsAt: Date.now() + TURN_TIME * 1000,
+      wind: Math.round((Math.random() * 2 - 1) * s.rules.wind * 100) / 100,
+      endsAt: Date.now() + s.rules.turnTime * 1000,
     };
     this.ctx.storage.setAlarm(s.turn.endsAt + TURN_GRACE_MS);
   }
@@ -191,12 +274,13 @@ export class GameRoom extends DurableObject {
 
   applyWorkers(list) {
     const byId = new Map(this.s.workers.map((w) => [w.id, w]));
+    const maxHp = this.s.rules.hp;
     for (const u of list) {
       const w = byId.get(u.id);
       if (!w) continue;
       w.x = num(u.x, w.x);
       w.y = num(u.y, w.y);
-      w.hp = Math.max(0, Math.min(MAX_HP, Math.round(num(u.hp, w.hp))));
+      w.hp = Math.max(0, Math.min(maxHp, Math.round(num(u.hp, w.hp))));
       w.dead = !!u.dead || w.hp <= 0;
     }
   }
@@ -208,26 +292,36 @@ export class GameRoom extends DurableObject {
     try { msg = JSON.parse(raw); } catch { return; }
     const att = ws.deserializeAttachment() || {};
     const s = this.s;
+    const me = () => s.players.find((x) => x.pid === att.pid);
 
     switch (msg.t) {
       case 'join': {
         const pid = clampStr(msg.pid, 40) || crypto.randomUUID();
         const name = clampStr(msg.name, 16) || 'Aushilfe';
         ws.serializeAttachment({ pid });
+        const fresh = !s.players.length && s.phase === 'lobby';
+        if (fresh) {
+          // Erster im (leeren) Raum legt fest, ob es ein Einzelspieler-Raum ist.
+          s.solo = !!msg.solo;
+          s.bots = [];
+          if (s.solo) this.addBot(2);
+        }
         let p = s.players.find((x) => x.pid === pid);
+        let joined = false;
         if (p) {
           p.connected = true;
           if (s.phase === 'lobby') p.name = name;
-        } else if (s.phase === 'lobby' && s.players.length < MAX_PLAYERS) {
-          const used = new Set(s.players.map((x) => x.color));
-          p = { pid, name, color: TEAM_COLORS.find((c) => !used.has(c)) || '#ffffff', connected: true };
+        } else if (s.phase === 'lobby' && (!s.solo || fresh) && s.players.length < MAX_PLAYERS && this.teamCount() < MAX_TEAMS) {
+          p = { pid, name, team: name, color: this.freeColor(), connected: true };
           s.players.push(p);
+          joined = true;
         }
         if (!s.hostPid || !s.players.some((x) => x.pid === s.hostPid && x.connected)) {
           s.hostPid = s.players.find((x) => x.connected)?.pid ?? null;
         }
-        this.send(ws, { t: 'welcome', pid, spectator: !p });
+        this.send(ws, { t: 'welcome', pid, spectator: !p, solo: s.solo, chat: s.chat });
         if (s.phase !== 'lobby') this.send(ws, { t: 'ops', game: s.game, from: 0, ops: s.ops });
+        if (joined && !s.solo) this.sys(`${name} hat eingestempelt.`);
         await this.save();
         this.broadcastState();
         // Falls gerade niemand ziehen konnte, jetzt weitermachen.
@@ -237,13 +331,71 @@ export class GameRoom extends DurableObject {
         break;
       }
 
+      // ----- Lobby: eigenes Team -----
+      case 'team': {
+        const p = me();
+        if (!p || s.phase !== 'lobby') return;
+        if (msg.name != null) p.team = clampStr(msg.name, 20) || p.name;
+        if (msg.color && TEAM_COLORS.includes(msg.color)
+          && ![...s.players, ...s.bots].some((x) => x !== p && x.color === msg.color)) p.color = msg.color;
+        await this.save();
+        this.broadcastState();
+        break;
+      }
+
+      // ----- Lobby: Schichtleitung -----
+      case 'rules': {
+        if (!this.isHost(att) || s.phase !== 'lobby') return;
+        s.rules = sanitizeRules(msg.rules, s.rules);
+        await this.save();
+        this.broadcastState();
+        break;
+      }
+
+      case 'addBot': {
+        if (!this.isHost(att)) return;
+        const lvl = Math.max(0, Math.min(BOT_LEVELS.length - 1, Math.round(num(msg.level, 2))));
+        if (this.addBot(lvl)) { await this.save(); this.broadcastState(); }
+        break;
+      }
+
+      case 'bot': {
+        if (!this.isHost(att) || s.phase !== 'lobby') return;
+        const b = s.bots.find((x) => x.id === msg.id);
+        if (!b) return;
+        if (msg.remove) s.bots = s.bots.filter((x) => x !== b);
+        else {
+          if (msg.level != null) b.level = Math.max(0, Math.min(BOT_LEVELS.length - 1, Math.round(num(msg.level, b.level))));
+          if (msg.name != null) b.name = clampStr(msg.name, 20) || b.name;
+          if (msg.color && TEAM_COLORS.includes(msg.color)
+            && ![...s.players, ...s.bots].some((x) => x !== b && x.color === msg.color)) b.color = msg.color;
+        }
+        await this.save();
+        this.broadcastState();
+        break;
+      }
+
+      case 'kick': {
+        if (!this.isHost(att) || s.phase !== 'lobby' || msg.pid === att.pid) return;
+        const p = s.players.find((x) => x.pid === msg.pid);
+        if (!p) return;
+        s.players = s.players.filter((x) => x !== p);
+        for (const o of this.ctx.getWebSockets()) {
+          if (o.deserializeAttachment()?.pid === p.pid) this.send(o, { t: 'kicked' });
+        }
+        this.sys(`${p.name} wurde von der Schichtleitung nach Hause geschickt.`);
+        await this.save();
+        this.broadcastState();
+        break;
+      }
+
       case 'start': {
-        if (att.pid !== s.hostPid || s.phase === 'playing') return;
+        if (!this.isHost(att) || s.phase === 'playing') return;
         if (s.phase === 'ended') {
           // Revanche: Spieler, die gegangen sind, aus der Lobby entfernen.
           s.players = s.players.filter((p) => p.connected);
         }
-        this.startGame(msg.workersPerTeam);
+        if (!this.startGame()) return;
         await this.save();
         this.broadcastState();
         this.broadcast({ t: 'ops', game: s.game, from: 0, ops: [] });
@@ -251,7 +403,7 @@ export class GameRoom extends DurableObject {
       }
 
       case 'lobby': {
-        if (att.pid !== s.hostPid || s.phase !== 'ended') return;
+        if (!this.isHost(att) || s.phase !== 'ended') return;
         s.phase = 'lobby';
         s.players = s.players.filter((p) => p.connected);
         await this.save();
@@ -302,9 +454,11 @@ export class GameRoom extends DurableObject {
       }
 
       case 'chat': {
-        const p = s.players.find((x) => x.pid === att.pid);
+        const p = me();
         const text = clampStr(msg.text, 140);
-        if (text) this.broadcast({ t: 'chat', name: p?.name || 'Zuschauer', color: p?.color || '#aaa', text });
+        if (!text) return;
+        this.chat({ name: p?.name || 'Zuschauer', color: p?.color || '#aaa', text });
+        await this.save();
         break;
       }
 
@@ -331,15 +485,17 @@ export class GameRoom extends DurableObject {
       (o) => o !== ws && o.readyState === 1 && o.deserializeAttachment()?.pid === pid,
     );
     if (stillThere) return;
+    const wasActive = s.phase === 'playing' && this.activePid() === pid;
+    const p = s.players.find((x) => x.pid === pid);
     if (s.phase === 'lobby') {
-      s.players = s.players.filter((p) => p.pid !== pid);
-    } else {
-      const p = s.players.find((x) => x.pid === pid);
-      if (p) p.connected = false;
+      s.players = s.players.filter((x) => x.pid !== pid);
+      if (p && !s.solo) this.sys(`${p.name} hat ausgestempelt.`);
+    } else if (p) {
+      p.connected = false;
     }
     if (s.hostPid === pid) s.hostPid = s.players.find((x) => x.connected)?.pid ?? null;
-    if (s.phase === 'playing' && this.activePid() === pid) {
-      // Aktiver Spieler weg: nach kurzer Wartezeit weiter.
+    if (wasActive) {
+      // Aktiver Spieler (oder Host während eines KI-Zugs) weg: nach kurzer Wartezeit weiter.
       this.ctx.storage.setAlarm(Date.now() + 8000);
     }
     await this.save();

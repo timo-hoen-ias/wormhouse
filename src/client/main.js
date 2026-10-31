@@ -3,7 +3,8 @@ import { Renderer } from './render.js';
 import { Net } from './net.js';
 import { Game } from './game.js';
 import { WEAPONS, WEAPON_BY_ID } from '../shared/weapons.js';
-import { MAX_HP, WORLD_W, WORLD_H } from '../shared/constants.js';
+import { MAX_HP, WORLD_W, WORLD_H, TEAM_COLORS } from '../shared/constants.js';
+import { RULES, AMMO_OPTIONS, AMMO_PRESETS, BOT_LEVELS, MAX_TEAMS, configurableWeapons, ammoFromRules } from '../shared/rules.js';
 import { unlockAudio, setMuted, isMuted, setMusicOn, isMusicOn, setMusicMode, startAmbience, audioReady } from './audio.js';
 
 const $ = (id) => document.getElementById(id);
@@ -32,6 +33,7 @@ let net = null;
 let room = null;
 let state = null;
 let myPid = null;
+let solo = false;
 
 const ui = {
   toastTimer: 0,
@@ -64,18 +66,21 @@ function playerName() {
   return n;
 }
 
-function joinRoom(code) {
+function joinRoom(code, wantSolo = false) {
   code = code.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
   if (code.length < 3) { $('code').focus(); return; }
   unlockAudio();
   const name = playerName();
   room = code;
-  history.replaceState(null, '', `?r=${code}`);
+  solo = wantSolo;
+  lobbyKeys = {};
+  $('lobbychat').innerHTML = '';
+  history.replaceState(null, '', wantSolo ? location.pathname : `?r=${code}`);
   net?.close();
   net = new Net(code, {
     open() {
       $('conn').classList.add('hidden');
-      net.send({ t: 'join', pid, name });
+      net.send({ t: 'join', pid, name, solo: wantSolo });
     },
     close() { $('conn').classList.remove('hidden'); },
     message: onMessage,
@@ -83,9 +88,33 @@ function joinRoom(code) {
   $('roomcode').textContent = code;
   $('menu-join').classList.add('hidden');
   $('menu-lobby').classList.remove('hidden');
+  $('menupanel').classList.add('wide');
+  renderSoloHead();
 }
 
+function leaveRoom() {
+  net?.close();
+  net = null;
+  state = null;
+  room = null;
+  history.replaceState(null, '', location.pathname);
+  $('menu-join').classList.remove('hidden');
+  $('menu-lobby').classList.add('hidden');
+  $('menupanel').classList.remove('wide');
+  $('menu').classList.remove('hidden');
+  $('hud').classList.add('hidden');
+  $('gameover').classList.add('hidden');
+  $('conn').classList.add('hidden');
+}
+
+function renderSoloHead() {
+  $('roomline').classList.toggle('hidden', solo);
+  $('sololine').classList.toggle('hidden', !solo);
+}
+
+$('solo').onclick = () => joinRoom(makeCode() + 'S', true);
 $('create').onclick = () => joinRoom(makeCode());
+$('leave').onclick = leaveRoom;
 $('join').onclick = () => joinRoom($('code').value);
 $('code').addEventListener('keydown', (e) => { if (e.key === 'Enter') joinRoom($('code').value); });
 $('name').addEventListener('keydown', (e) => {
@@ -96,8 +125,10 @@ $('copylink').onclick = async () => {
   try { await navigator.clipboard.writeText(url); $('copylink').textContent = 'Kopiert!'; } catch { prompt('Link:', url); }
   setTimeout(() => ($('copylink').textContent = 'Link kopieren'), 1500);
 };
-$('start').onclick = () => net?.send({ t: 'start', workersPerTeam: +$('wpt').value });
-$('rematch').onclick = () => net?.send({ t: 'start', workersPerTeam: state?.workersPerTeam || 3 });
+$('start').onclick = () => net?.send({ t: 'start' });
+$('rematch').onclick = () => net?.send({ t: 'start' });
+$('botlevel').innerHTML = BOT_LEVELS.map((b) => `<option value="${b.level}"${b.level === 2 ? ' selected' : ''}>${esc(b.name)} – ${esc(b.desc)}</option>`).join('');
+$('addbot').onclick = () => net?.send({ t: 'addBot', level: +$('botlevel').value });
 $('tolobby').onclick = () => net?.send({ t: 'lobby' });
 function renderAudioButtons() {
   $('mute').textContent = isMuted() ? '🔇' : '🔊';
@@ -119,7 +150,15 @@ function onMessage(msg) {
     case 'welcome':
       myPid = msg.pid;
       game.myPid = msg.pid;
-      if (msg.spectator) ui.toast('Spiel läuft schon – du schaust zu.', '#90caf9');
+      solo = !!msg.solo;
+      renderSoloHead();
+      $('lobbychat').innerHTML = '';
+      for (const c of msg.chat || []) addChat(c, false);
+      if (msg.spectator) ui.toast('Kein Platz mehr im Team – du schaust zu.', '#90caf9');
+      break;
+    case 'kicked':
+      leaveRoom();
+      ui.toast('Die Schichtleitung hat dich nach Hause geschickt.', '#ff8a65');
       break;
     case 'state':
       state = msg.state;
@@ -130,8 +169,95 @@ function onMessage(msg) {
     case 'op': game.onOp(msg.game, msg.i, msg.op, msg.fx); break;
     case 'snap': game.onSnap(msg); break;
     case 'fx': game.onFx(msg); break;
-    case 'chat': addChat(msg.name, msg.color, msg.text); break;
+    case 'chat': addChat(msg); break;
   }
+}
+
+let lobbyKeys = {};
+// Nur neu zeichnen, wenn sich der Inhalt geändert hat (sonst gehen offene Auswahllisten zu).
+function changed(key, value) {
+  const j = JSON.stringify(value);
+  if (lobbyKeys[key] === j) return false;
+  lobbyKeys[key] = j;
+  return true;
+}
+
+function colorPicker(current, taken, data) {
+  return `<div class="swatches">${TEAM_COLORS.map((c) => `<button class="swatch${c === current ? ' sel' : ''}" style="background:${c}"
+    ${taken.has(c) && c !== current ? 'disabled' : ''} data-color="${c}" ${data} title="Farbe wählen"></button>`).join('')}</div>`;
+}
+
+function renderTeams(isHost) {
+  const used = new Set([...state.players, ...state.bots].map((x) => x.color));
+  if (!changed('teams', [state.players, state.bots, state.hostPid, myPid, isHost])) return;
+  const focus = document.activeElement?.id === 'myteamname' ? $('myteamname').selectionStart : null;
+  const rows = state.players.map((p) => {
+    const mine = p.pid === myPid;
+    const tags = `${p.pid === state.hostPid ? '<span class="tag host">Schichtleitung</span>' : ''}${p.connected ? '' : '<span class="tag">offline</span>'}`;
+    return `<li class="team${mine ? ' mine' : ''}" style="--team:${p.color}">
+      <div class="trow"><span class="dot"></span>
+        ${mine ? `<input id="myteamname" maxlength="20" value="${esc(p.team || p.name)}" title="Teamname" />` : `<b>${esc(p.team || p.name)}</b>`}
+        <span class="who">${esc(p.name)}${mine ? ' (du)' : ''}</span>${tags}
+        ${isHost && !mine ? `<button class="small ghost" data-kick="${esc(p.pid)}" title="Nach Hause schicken">✕</button>` : ''}
+      </div>
+      ${mine ? colorPicker(p.color, used, 'data-own="1"') : ''}
+    </li>`;
+  });
+  for (const b of state.bots) {
+    const lvl = BOT_LEVELS[b.level] || BOT_LEVELS[2];
+    rows.push(`<li class="team bot" style="--team:${b.color}">
+      <div class="trow"><span class="dot"></span>
+        ${isHost ? `<input class="botname" data-bot="${b.id}" maxlength="20" value="${esc(b.name)}" />` : `<b>${esc(b.name)}</b>`}
+        ${isHost ? `<select data-botlevel="${b.id}">${BOT_LEVELS.map((x) => `<option value="${x.level}"${x.level === b.level ? ' selected' : ''}>🤖 ${esc(x.name)}</option>`).join('')}</select>`
+          : `<span class="who">🤖 ${esc(lvl.name)}</span>`}
+        ${isHost ? `<button class="small ghost" data-rmbot="${b.id}" title="Entfernen">✕</button>` : ''}
+      </div>
+      ${isHost ? colorPicker(b.color, used, `data-botcolor="${b.id}"`) : ''}
+    </li>`);
+  }
+  if (state.players.length + state.bots.length < 2) {
+    rows.push('<li class="team empty">Kein Gegner? Dann stehen Inventur-Dummies als Zielscheiben rum.</li>');
+  }
+  const el = $('teamlist');
+  el.innerHTML = rows.join('');
+  const own = $('myteamname');
+  if (own) {
+    own.onchange = () => net?.send({ t: 'team', name: own.value });
+    own.onkeydown = (e) => { e.stopPropagation(); if (e.key === 'Enter') own.blur(); };
+    if (focus != null) { own.focus(); own.setSelectionRange(focus, focus); }
+  }
+  el.querySelectorAll('[data-own]').forEach((b) => { b.onclick = () => net?.send({ t: 'team', color: b.dataset.color }); });
+  el.querySelectorAll('[data-botcolor]').forEach((b) => { b.onclick = () => net?.send({ t: 'bot', id: b.dataset.botcolor, color: b.dataset.color }); });
+  el.querySelectorAll('[data-botlevel]').forEach((sel) => { sel.onchange = () => net?.send({ t: 'bot', id: sel.dataset.botlevel, level: +sel.value }); });
+  el.querySelectorAll('.botname').forEach((inp) => {
+    inp.onchange = () => net?.send({ t: 'bot', id: inp.dataset.bot, name: inp.value });
+    inp.onkeydown = (e) => { e.stopPropagation(); if (e.key === 'Enter') inp.blur(); };
+  });
+  el.querySelectorAll('[data-rmbot]').forEach((b) => { b.onclick = () => net?.send({ t: 'bot', id: b.dataset.rmbot, remove: true }); });
+  el.querySelectorAll('[data-kick]').forEach((b) => { b.onclick = () => net?.send({ t: 'kick', pid: b.dataset.kick }); });
+}
+
+function sendRules(patch) {
+  net?.send({ t: 'rules', rules: patch });
+}
+
+function renderRules(isHost) {
+  const r = state.rules || {};
+  if (!changed('rules', [r, isHost])) return;
+  $('rulesnote').textContent = isHost ? '' : '(stellt die Schichtleitung ein)';
+  $('rules').innerHTML = RULES.map((d) => `<label class="rule"><span>${esc(d.label)}</span>
+    <select data-rule="${d.key}" ${isHost ? '' : 'disabled'}>${d.options.map(([v, l]) => `<option value="${v}"${v === r[d.key] ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></label>`).join('');
+  $('rules').querySelectorAll('[data-rule]').forEach((sel) => { sel.onchange = () => sendRules({ [sel.dataset.rule]: +sel.value }); });
+  // Waffenlager: Munition pro Waffe
+  const ammo = ammoFromRules(r);
+  $('presets').innerHTML = isHost ? Object.entries(AMMO_PRESETS).map(([k, p]) => `<button class="small" data-preset="${k}">${esc(p.label)}</button>`).join('') : '';
+  $('presets').querySelectorAll('[data-preset]').forEach((b) => { b.onclick = () => sendRules({ ammo: AMMO_PRESETS[b.dataset.preset].ammo() }); });
+  $('ammo').innerHTML = configurableWeapons().map((w) => `<label class="ammo${ammo[w.id] === 0 ? ' off' : ''}" title="${esc(w.desc)}">
+    <span>${w.icon} ${esc(w.name)}</span>
+    <select data-ammo="${w.id}" ${isHost ? '' : 'disabled'}>${AMMO_OPTIONS.map(([v, l]) => `<option value="${v}"${v === ammo[w.id] ? ' selected' : ''}>${l}</option>`).join('')}</select></label>`).join('');
+  $('ammo').querySelectorAll('[data-ammo]').forEach((sel) => {
+    sel.onchange = () => sendRules({ ammo: { ...(state.rules.ammo || {}), [sel.dataset.ammo]: +sel.value } });
+  });
 }
 
 function renderLobby() {
@@ -141,12 +267,15 @@ function renderLobby() {
   $('menu').classList.toggle('hidden', !inLobby);
   $('hud').classList.toggle('hidden', inLobby);
   $('gameover').classList.toggle('hidden', state.phase !== 'ended');
-  $('playerlist').innerHTML = state.players.map((p) => `
-    <li><span class="dot" style="background:${p.color}"></span>${esc(p.name)}
-    <span class="tag">${p.pid === state.hostPid ? 'Schichtleitung' : ''}${p.pid === myPid ? ' (du)' : ''}${p.connected ? '' : ' offline'}</span></li>`).join('');
-  $('hostcontrols').classList.toggle('hidden', !isHost);
-  $('waithost').classList.toggle('hidden', isHost);
-  $('start').textContent = state.players.length > 1 ? 'Schicht beginnen!' : 'Übungsschicht starten';
+  if (inLobby) {
+    renderTeams(isHost);
+    renderRules(isHost);
+    const teams = state.players.length + state.bots.length;
+    $('addbotrow').classList.toggle('hidden', !isHost || teams >= MAX_TEAMS);
+    $('hostcontrols').classList.toggle('hidden', !isHost);
+    $('waithost').classList.toggle('hidden', isHost);
+    $('start').textContent = state.bots.length || state.players.length > 1 ? 'Schicht beginnen!' : 'Übungsschicht starten';
+  }
 
   if (state.phase === 'ended') {
     const t = state.teams[state.winner];
@@ -157,6 +286,7 @@ function renderLobby() {
     $('tolobby').classList.toggle('hidden', !isHost);
     $('waitrematch').classList.toggle('hidden', isHost);
   }
+  if (!inLobby) lobbyKeys = {};
   renderWeapons();
 }
 
@@ -167,7 +297,7 @@ function renderWeapons() {
   el.innerHTML = '';
   WEAPONS.forEach((w, i) => {
     const b = document.createElement('button');
-    b.className = 'wbtn' + (game.weapon === w.id ? ' sel' : '');
+    b.className = 'wbtn' + (game.myTurn && game.weapon === w.id ? ' sel' : '');
     const ammo = state?.teams?.[game.myTeamIndex()]?.ammo?.[w.id] ?? w.ammo;
     b.innerHTML = `<span class="key">${KEY_LABELS[i]}</span>${w.icon}<span class="ammo">${ammo < 0 ? '∞' : ammo}</span>`;
     b.title = `${w.name} – ${w.desc}`;
@@ -188,10 +318,10 @@ function updateHud() {
   // Teams
   $('teams').innerHTML = state.teams.map((t, i) => {
     const hp = game.workers.filter((w) => w.team === i && !w.dead).reduce((s, w) => s + w.hp, 0);
-    const max = state.workersPerTeam * MAX_HP;
+    const max = (state.rules?.workersPerTeam || 3) * (state.rules?.hp || MAX_HP);
     const conn = !t.pid || state.players.find((p) => p.pid === t.pid)?.connected;
     return `<div class="teambar ${hp <= 0 ? 'off' : ''} ${turn && turn.team === i ? 'current' : ''}">
-      <span class="tname" style="color:${t.color}">${esc(t.name)}${conn ? '' : ' 💤'}</span>
+      <span class="tname" style="color:${t.color}">${t.bot ? '🤖 ' : ''}${esc(t.name)}${conn ? '' : ' 💤'}</span>
       <div class="bar"><div class="fill" style="width:${(hp / max) * 100}%;background:${t.color}"></div></div>
       <span>${hp}</span></div>`;
   }).join('');
@@ -200,8 +330,8 @@ function updateHud() {
   $('turnname').innerHTML = team ? `<span style="color:${team.color}">${esc(team.name)}</span>${w ? ' · ' + esc(w.name) : ''}` : '';
   const timer = $('timer');
   let secs;
-  const retreat = game.myTurn ? game.retreatLeft() : game.remote.retreat || 0;
-  const inRetreat = game.myTurn ? game.tp === 'retreat' : retreat > 0 && !game.remote.aiming;
+  const retreat = game.sim ? game.retreatLeft() : game.remote.retreat || 0;
+  const inRetreat = game.sim ? game.tp === 'retreat' : retreat > 0 && !game.remote.aiming;
   if (inRetreat) secs = Math.ceil(retreat);
   else secs = Math.ceil(game.timeLeft());
   timer.textContent = state.phase === 'playing' ? secs : '–';
@@ -209,6 +339,8 @@ function updateHud() {
   timer.classList.toggle('retreat', inRetreat);
   if (game.myTurn && game.tp === 'aim' && secs <= 5 && secs !== lastSecond && secs > 0) game.fx?.call(game, { k: 'sfx', s: 'tick' });
   lastSecond = secs;
+  // Sudden Death
+  $('sudden').classList.toggle('hidden', !state.sudden);
   // Wind
   const wind = turn?.wind || 0;
   const fill = document.querySelector('.windfill');
@@ -217,13 +349,30 @@ function updateHud() {
 }
 
 // ---------- Chat ----------
-function addChat(name, color, text) {
-  const log = $('chatlog');
+function chatLine(m) {
   const d = document.createElement('div');
-  d.innerHTML = `<b style="color:${esc(color)}">${esc(name)}:</b> ${esc(text)}`;
-  log.appendChild(d);
+  if (m.sys) { d.className = 'sys'; d.textContent = m.text; }
+  else d.innerHTML = `<b style="color:${esc(m.color)}">${esc(m.name)}:</b> ${esc(m.text)}`;
+  return d;
+}
+function addChat(m, inGame = true) {
+  const lob = $('lobbychat');
+  lob.appendChild(chatLine(m));
+  while (lob.children.length > 60) lob.firstChild.remove();
+  lob.scrollTop = lob.scrollHeight;
+  if (!inGame) return;
+  const log = $('chatlog');
+  log.appendChild(chatLine(m));
   while (log.children.length > 8) log.firstChild.remove();
 }
+$('lobbychatinput').addEventListener('keydown', (e) => {
+  e.stopPropagation();
+  if (e.key === 'Enter') {
+    const text = e.target.value.trim();
+    if (text) net?.send({ t: 'chat', text });
+    e.target.value = '';
+  }
+});
 $('chatinput').addEventListener('keydown', (e) => {
   e.stopPropagation();
   if (e.key === 'Enter') {

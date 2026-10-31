@@ -9,9 +9,9 @@ export const TURN_GRACE_MS = 20000; // Server erzwingt Zugwechsel nach Ablauf + 
 export const GRAVITY = 700;
 export const WORKER_R = 9;
 export const MAX_HP = 100;
-export const MAX_PLAYERS = 4;
+export const MAX_PLAYERS = 6; // menschliche Spieler pro Raum (Teams inkl. KI: MAX_TEAMS in rules.js)
 
-export const TEAM_COLORS = ['#e53935', '#1e88e5', '#43a047', '#fdd835'];
+export const TEAM_COLORS = ['#e53935', '#1e88e5', '#43a047', '#fdd835', '#8e24aa', '#fb8c00', '#00acc1', '#f06292'];
 
 export const WORKER_NAMES = [
   'Kalle', 'Jürgen', 'Gabi', 'Uwe', 'Heike', 'Detlef', 'Mandy', 'Ronny',

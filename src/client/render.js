@@ -418,12 +418,23 @@ export class Renderer {
     const m = new THREE.MeshStandardMaterial({ color: '#0d4a6b', transparent: true, opacity: 0.88, roughness: 0.2, metalness: 0.1, emissive: '#06283a', emissiveIntensity: 0.6 });
     this.water = new THREE.Mesh(geo, m);
     this.water.position.set(W / 2, ty(WATER_Y) - 450, 30);
+    this.waterY = WATER_Y;
+    this.waterShown = WATER_Y;
     this.waterBase = Float32Array.from(geo.attributes.position.array);
     this.scene.add(this.water);
     // Kaikante als Hinweis
     const back = new THREE.Mesh(new THREE.PlaneGeometry(W * 4, 900), new THREE.MeshStandardMaterial({ color: '#0a3550', roughness: 0.3 }));
     back.position.set(W / 2, ty(WATER_Y) - 455, -60);
     this.scene.add(back);
+    this.waterBack = back;
+  }
+
+  // Sudden Death: Hafenbecken steigt (weich animiert).
+  setWaterLevel(y, instant = false) {
+    this.waterY = y;
+    if (instant) this.waterShown = y;
+    this.water.position.y = ty(this.waterShown) - 450;
+    this.waterBack.position.y = ty(this.waterShown) - 455;
   }
 
   setTerrain(terrain) {
@@ -774,7 +785,7 @@ export class Renderer {
   }
 
   splash(x) {
-    const pos = new THREE.Vector3(tx(x), ty(WATER_Y), 32);
+    const pos = new THREE.Vector3(tx(x), ty(this.waterY), 32);
     for (let i = 0; i < 20; i++) {
       const p = new THREE.Mesh(new THREE.SphereGeometry(2 + Math.random() * 2, 6, 6),
         new THREE.MeshBasicMaterial({ color: '#9fd3f5', transparent: true, opacity: 0.85 }));
@@ -878,6 +889,11 @@ export class Renderer {
     this.camera.position.set(this.camTarget.x + sx, this.camTarget.y + 60 + sy, this.camPos.z);
     this.camera.lookAt(this.camTarget.x + sx * 0.5, this.camTarget.y + sy * 0.5, 0);
 
+    if (Math.abs(this.waterShown - this.waterY) > 0.1) {
+      this.waterShown += (this.waterY - this.waterShown) * (1 - Math.exp(-dt * 1.5));
+      this.water.position.y = ty(this.waterShown) - 450;
+      this.waterBack.position.y = ty(this.waterShown) - 455;
+    }
     // Wasserwellen
     const pos = this.water.geometry.attributes.position;
     for (let i = 0; i < pos.count; i++) {

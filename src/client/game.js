@@ -4,6 +4,7 @@
 import {
   WORLD_W as W, WORLD_H as H, WATER_Y, GRAVITY, WORKER_R, MAX_HP, RETREAT_TIME,
 } from '../shared/constants.js';
+import { BotController } from './ai.js';
 import { WEAPON_BY_ID, PROJECTILE_TYPES } from '../shared/weapons.js';
 import { findSpawns, isFree } from '../shared/terrain-gen.js';
 import { Terrain } from './terrain.js';
@@ -31,7 +32,11 @@ export class Game {
     this.workers = [];
     this.projectiles = [];
     this.turnN = -1;
-    this.myTurn = false;
+    this.myTurn = false; // ich (Mensch) bin am Zug
+    this.botTurn = false; // ich steuere als Schichtleitung gerade ein KI-Team
+    this.sim = false; // dieser Client simuliert den laufenden Zug
+    this.ai = null;
+    this.waterY = WATER_Y;
     this.tp = 'wait'; // aim | retreat | resolve | done | wait
     this.weapon = 'paket';
     this.aimSpeed = 1.6;
@@ -79,6 +84,8 @@ export class Game {
     return Math.max(0, (this.turnLocalEnd - performance.now()) / 1000);
   }
 
+  get rules() { return this.state?.rules || {}; }
+
   retreatLeft() {
     return Math.max(0, (this.retreatEnd - performance.now()) / 1000);
   }
@@ -91,6 +98,9 @@ export class Game {
 
     if (state.phase === 'lobby') {
       this.myTurn = false;
+      this.botTurn = false;
+      this.sim = false;
+      this.ai = null;
       this.tp = 'wait';
       this.stopLoops();
       return;
@@ -100,18 +110,37 @@ export class Game {
       this.newGame(state);
     }
 
+    this.setWaterLevel(state.waterY ?? WATER_Y);
     const t = state.turn;
     if (state.phase === 'playing' && t && t.n !== prevTurn) {
+      this.beginTurn(state);
+    } else if (state.phase === 'playing' && t && !this.sim && this.controlsTurn(state)) {
+      // Schichtleitung hat gewechselt, während ein KI-Team am Zug ist: jetzt steuere ich.
       this.beginTurn(state);
     } else if (state.phase === 'ended' && prevPhase !== 'ended') {
       this.syncWorkersFromServer(state.workers);
       this.myTurn = false;
+      this.botTurn = false;
+      this.sim = false;
+      this.ai = null;
       this.tp = 'wait';
       this.projectiles = [];
       this.stopLoops();
       const mine = this.myTeamIndex();
       if (mine >= 0 && state.winner !== mine) sfx.lose(); else sfx.win();
     }
+  }
+
+  controlsTurn(state) {
+    const team = state.teams[state.turn?.team];
+    if (!team) return false;
+    return team.pid ? team.pid === this.myPid : team.bot > 0 && state.hostPid === this.myPid;
+  }
+
+  setWaterLevel(y) {
+    if (y < this.waterY - 0.5 && this.terrain) this.ui.toast?.('🌊 Das Hafenbecken steigt!', '#4fc3f7');
+    this.waterY = y;
+    this.renderer.setWaterLevel?.(y);
   }
 
   newGame(state) {
@@ -131,6 +160,8 @@ export class Game {
       airTop: null, stepT: 0, stepAlt: false,
     }));
     this.graves = [];
+    this.waterY = state.waterY ?? WATER_Y;
+    this.renderer.setWaterLevel?.(this.waterY, true);
     for (const w of this.workers) { w.rx = w.x; w.ry = w.y; }
     this.projectiles = [];
     this.turnN = -1;
@@ -170,9 +201,17 @@ export class Game {
     this.retreatEnd = 0;
     const team = state.teams[t.team];
     this.myTurn = !!team && team.pid === this.myPid;
-    this.tp = this.myTurn ? 'aim' : 'wait';
+    this.botTurn = !!team && !team.pid && team.bot > 0 && state.hostPid === this.myPid;
+    this.sim = this.myTurn || this.botTurn;
+    this.ai = this.botTurn ? new BotController(this, team.bot) : null;
+    this.tp = this.sim ? 'aim' : 'wait';
     const w = this.activeWorker();
-    if (this.myTurn) {
+    if (this.botTurn) {
+      if ((team.ammo[this.weapon] ?? 0) === 0) this.weapon = 'paket';
+      this.shotsLeft = WEAPON_BY_ID[this.weapon].shots || 1;
+      this.ui.toast(`${team.name} ist dran${w ? ` (${w.name})` : ''} 🤖`, team.color);
+    } else if (this.myTurn) {
+      this.weapon = this.myWeapon || this.weapon;
       if ((team.ammo[this.weapon] ?? 0) === 0) this.weapon = 'paket';
       this.shotsLeft = WEAPON_BY_ID[this.weapon].shots || 1;
       this.ui.toast(`Du bist dran! ${w ? w.name : ''} wartet auf Anweisungen.`, team.color);
@@ -217,7 +256,7 @@ export class Game {
   }
 
   onSnap(msg) {
-    if (this.myTurn || !this.turn || msg.n !== this.turn.n) return;
+    if (this.sim || !this.turn || msg.n !== this.turn.n) return;
     for (const a of msg.w) {
       const w = this.workers.find((x) => x.id === a[0]);
       if (!w) continue;
@@ -271,7 +310,7 @@ export class Game {
 
   // ---------- Eingabe ----------
   canAct() {
-    return this.myTurn && (this.tp === 'aim' || this.tp === 'retreat');
+    return this.sim && (this.tp === 'aim' || this.tp === 'retreat');
   }
 
   selectWeapon(id) {
@@ -280,8 +319,18 @@ export class Game {
     if (!wpn || this.ammoOf(id) === 0) return;
     if (this.weapon === 'scanner' && this.shotsLeft < (WEAPON_BY_ID.scanner.shots)) return;
     this.weapon = id;
+    this.myWeapon = id;
     this.shotsLeft = wpn.shots || 1;
     this.ui.refreshWeapons();
+  }
+
+  // Waffenwahl der KI (ohne die Prüfung auf menschlichen Zug).
+  botSelectWeapon(id) {
+    const wpn = WEAPON_BY_ID[id];
+    if (!this.botTurn || !wpn || this.ammoOf(id) === 0) return false;
+    this.weapon = id;
+    this.shotsLeft = wpn.shots || 1;
+    return true;
   }
 
   keyDown(code) {
@@ -306,7 +355,7 @@ export class Game {
 
   keyUp(code) {
     this.keys.delete(code);
-    if (code === 'Space' && this.charging) this.fire(this.charge);
+    if (code === 'Space' && this.charging && this.myTurn) this.fire(this.charge);
   }
 
   click(x, y) {
@@ -320,7 +369,7 @@ export class Game {
   // ---------- Hauptschleife ----------
   update(dt) {
     if (!this.terrain || !this.state || this.state.phase === 'lobby') return;
-    if (this.myTurn && this.tp !== 'done') {
+    if (this.sim && this.tp !== 'done') {
       this.acc += Math.min(dt, 0.1);
       while (this.acc >= STEP) {
         this.acc -= STEP;
@@ -335,7 +384,7 @@ export class Game {
       this.acc = 0;
     }
     // Weiche Darstellung (bei Zuschauern interpoliert)
-    const k = this.myTurn ? 1 : 1 - Math.exp(-dt * 18);
+    const k = this.sim ? 1 : 1 - Math.exp(-dt * 18);
     for (const w of this.workers) {
       if (w.rx == null || Math.hypot(w.x - w.rx, w.y - w.ry) > 200) { w.rx = w.x; w.ry = w.y; }
       w.rx += (w.x - w.rx) * k;
@@ -348,7 +397,7 @@ export class Game {
       w.shownHp = w.hp;
       if (w.dead && !w.shownDead) {
         this.renderer.puff(w.x, w.y, '#ffffff');
-        if (w.y < WATER_Y) {
+        if (w.y < this.waterY) {
           this.renderer.explosion(w.x, w.y, 14);
           this.graves.push({ id: w.id, team: w.team, x: w.x, y: w.y, vy: 0, tilt: (Math.random() - 0.5) * 0.3 });
         }
@@ -396,7 +445,7 @@ export class Game {
         if (this.terrain.hitsCircle(g.x, g.y + 1, 6)) { g.vy = 0; break; }
         g.y += (g.vy * dt) / steps;
       }
-      if (g.y > WATER_Y + 8) { g.sunk = true; this.renderer.splash(g.x); }
+      if (g.y > this.waterY + 8) { g.sunk = true; this.renderer.splash(g.x); }
     }
     this.graves = this.graves.filter((g) => !g.sunk);
   }
@@ -407,7 +456,7 @@ export class Game {
     setLoop('engine', playing && this.projectiles.some((p) => p.type === 'stapler' && !p.dead));
     const gas = playing && this.projectiles.find((p) => p.type === 'gas' && !p.dead);
     setLoop('hiss', !!gas, gas && gas.fuse != null ? Math.max(0, 1 - gas.fuse / 5) : 0);
-    const charge = this.myTurn ? (this.charging ? this.charge : 0) : (this.remote.aiming ? this.remote.charge : 0);
+    const charge = this.sim ? (this.charging ? this.charge : 0) : (this.remote.aiming ? this.remote.charge : 0);
     setLoop('charge', playing && charge > 0, charge);
   }
 
@@ -422,6 +471,7 @@ export class Game {
     if (this.tp === 'retreat' && now >= this.retreatEnd) this.tp = 'resolve';
     if ((this.tp === 'aim' || this.tp === 'retreat') && (!w || w.dead)) this.tp = 'resolve';
 
+    if (this.ai && w && !w.dead) this.ai.update(dt);
     if (w && !w.dead && (this.tp === 'aim' || this.tp === 'retreat')) this.handleInput(w, dt);
     else if (w) w.walking = false;
 
@@ -439,7 +489,7 @@ export class Game {
   }
 
   handleInput(w, dt) {
-    const k = this.keys;
+    const k = this.ai ? this.ai.keys : this.keys;
     const left = k.has('ArrowLeft') || k.has('KeyA');
     const right = k.has('ArrowRight') || k.has('KeyD');
     const up = k.has('ArrowUp') || k.has('KeyW');
@@ -515,6 +565,7 @@ export class Game {
     if (this.terrain.hitsCircle(w.x, w.y, WORKER_R)) {
       for (let i = 0; i < 40 && this.terrain.hitsCircle(w.x, w.y, WORKER_R); i++) w.y -= 1;
     }
+    if (w.y > this.waterY + 4) { this.drown(w); return; }
     if (w.grounded) {
       if (this.isGrounded(w, WORKER_R)) { w.vx = 0; w.vy = 0; return; }
       w.grounded = false;
@@ -523,7 +574,7 @@ export class Game {
     w.vy += GRAVITY * dt;
     const res = this.moveCircle(w, dt, WORKER_R, 0.3);
     if (res) {
-      const dmg = fallDamage(res.impact);
+      const dmg = this.rules.fallDamage === 0 ? 0 : fallDamage(res.impact);
       if (dmg > 0 && res.n.y < -0.3) this.fallHurt(w, dmg);
       if (res.n.y < -0.55 && Math.hypot(w.vx, w.vy) < 130) {
         w.grounded = true; w.vx = 0; w.vy = 0;
@@ -531,7 +582,7 @@ export class Game {
     }
     w.still = Math.hypot(w.x - ox, w.y - oy) < 0.3 ? w.still + dt : 0;
     if (w.still > 0.4 && this.isGrounded(w, WORKER_R)) { w.grounded = true; w.vx = 0; w.vy = 0; }
-    if (w.y > WATER_Y + 4) this.drown(w);
+    if (w.y > this.waterY + 4) this.drown(w);
   }
 
   fallHurt(w, dmg) {
@@ -641,7 +692,7 @@ export class Game {
       }
       case 'teleport': {
         if (!target) return;
-        if (target.y > WATER_Y - 10 || target.x < 10 || target.x > W - 10 || !isFree(this.terrain.mat, target.x, target.y, WORKER_R + 1)) {
+        if (target.y > this.waterY - 10 || target.x < 10 || target.x > W - 10 || !isFree(this.terrain.mat, target.x, target.y, WORKER_R + 1)) {
           this.ui.toast('Da ist kein Platz im Regal.', '#ff5252');
           return;
         }
@@ -682,7 +733,7 @@ export class Game {
       this.tp = 'resolve';
     } else {
       this.tp = 'retreat';
-      this.retreatEnd = performance.now() + RETREAT_TIME * 1000;
+      this.retreatEnd = performance.now() + (this.rules.retreatTime ?? RETREAT_TIME) * 1000;
     }
   }
 
@@ -691,7 +742,7 @@ export class Game {
     let hitWorker = null;
     for (let i = 0; i < 500; i++) {
       x += dir.x * 2; y += dir.y * 2;
-      if (x < -50 || x > W + 50 || y < -400 || y > WATER_Y) break;
+      if (x < -50 || x > W + 50 || y < -400 || y > this.waterY) break;
       hitWorker = this.workers.find((o) => o !== w && !o.dead && Math.hypot(o.x - x, o.y - y) < WORKER_R + 1);
       if (hitWorker) break;
       if (this.terrain.solid(x, y)) break;
@@ -820,9 +871,9 @@ export class Game {
         break;
       }
     }
-    if (!p.dead && (p.y > WATER_Y + 4 || p.x < -500 || p.x > W + 500 || p.y > H + 100)) {
+    if (!p.dead && (p.y > this.waterY + 4 || p.x < -500 || p.x > W + 500 || p.y > H + 100)) {
       p.dead = true;
-      if (p.y > WATER_Y) this.fx({ k: 'splash', x: p.x });
+      if (p.y > this.waterY) this.fx({ k: 'splash', x: p.x });
     }
   }
 
@@ -866,7 +917,7 @@ export class Game {
     const p = this.projectiles.find((x) => !x.dead);
     if (p) return p;
     const flying = this.workers.find((w) => !w.dead && !w.grounded && Math.hypot(w.vx || 0, w.vy || 0) > 250);
-    if (flying && this.myTurn) return flying;
+    if (flying && this.sim) return flying;
     const a = this.activeWorker();
     return a && !a.dead ? { x: a.rx ?? a.x, y: a.ry ?? a.y } : null;
   }
@@ -874,18 +925,18 @@ export class Game {
   render(dt) {
     if (!this.terrain || !this.state || this.state.phase === 'lobby') return;
     const active = this.activeWorker();
-    const wpnId = this.myTurn ? this.weapon : this.remote.weapon;
+    const wpnId = this.sim ? this.weapon : this.remote.weapon;
     const wpn = WEAPON_BY_ID[wpnId] || WEAPON_BY_ID.paket;
-    const aiming = this.myTurn ? this.tp === 'aim' : this.remote.aiming;
+    const aiming = this.sim ? this.tp === 'aim' : this.remote.aiming;
     const playing = this.state.phase === 'playing';
     const held = playing && aiming ? { id: wpn.id, aimArm: ['projectile', 'grenade', 'hitscan'].includes(wpn.kind) } : null;
-    const charge = this.myTurn ? this.charge : this.remote.charge;
+    const charge = this.sim ? this.charge : this.remote.charge;
     this.renderer.syncWorkers(this.workers, this.teams, playing ? active?.id : -1, held, aiming ? charge : 0, dt);
     this.renderer.setProjectiles(this.projectiles.filter((p) => !p.dead), dt);
     this.renderer.syncGraves(this.graves, this.teams);
     const showAim = !!active && !active.dead && aiming && !wpn.target && ['projectile', 'grenade', 'hitscan'].includes(wpn.kind);
     if (active) {
-      this.renderer.showAim({ x: active.rx ?? active.x, y: active.ry ?? active.y }, active.aim, active.facing, this.myTurn ? this.charge : this.remote.charge, showAim);
+      this.renderer.showAim({ x: active.rx ?? active.x, y: active.ry ?? active.y }, active.aim, active.facing, this.sim ? this.charge : this.remote.charge, showAim);
     } else {
       this.renderer.showAim(null, 0, 1, 0, false);
     }
