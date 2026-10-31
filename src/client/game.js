@@ -11,7 +11,7 @@ import { MAP_BY_ID, COMPLEXITY } from '../shared/maps.js';
 import { Terrain } from './terrain.js';
 import { fallDamage } from '../shared/fall.js';
 import { sfx, setLoop } from './audio.js';
-import { ROPE, newRope, fireHook as shootHook, hookStep, ropeStep } from '../shared/rope.js';
+import { ROPE, KNOCK, knockHit, newRope, fireHook as shootHook, hookStep, ropeStep } from '../shared/rope.js';
 
 const STEP = 1 / 60;
 const RESOLVE_MAX = 10; // Sekunden: länger wartet ein Zug nie auf Ruhe
@@ -170,7 +170,8 @@ export class Game {
     this.gameNo = state.game;
     this.terrain = new Terrain(state.seed, state.map);
     const m = MAP_BY_ID[state.map?.id];
-    if (m) this.ui.toast?.(`${m.icon} ${m.name} · ${COMPLEXITY[state.map.complexity]?.name ?? ''}`, '#ffc400');
+    this.ropeMap = !!m?.rope;
+    if (m) this.ui.toast?.(`${state.rules?.mode === 'seil' ? '🧗 Rope only · ' : ''}${m.icon} ${m.name} · ${COMPLEXITY[state.map.complexity]?.name ?? ''}`, '#ffc400');
     const spawns = findSpawns(this.terrain.mat, state.seed, state.workers.length);
     this.spawns = spawns;
     this.renderer.setTerrain(this.terrain);
@@ -783,22 +784,23 @@ export class Game {
       this.fx({ k: 'sfx', s: 'release' });
       this.ui.toast('Der Haken hat keinen Halt mehr!', '#ff8f00');
     }
-    this.ropeKnock(w);
     w.still = 0;
     if (w.y > this.waterY + 4) this.drown(w);
   }
 
-  // Wie in Worms: Wer am Seil in Kollegen kracht, schubst sie weg (ohne Schaden).
+  // Wie in Worms: Wer das Seil loslässt und im freien Flug in Kollegen kracht,
+  // schubst sie weg (ohne Schaden). Am Seil hängend wird niemand geschubst.
   ropeKnock(w) {
-    const sp = Math.hypot(w.vx, w.vy);
     for (const o of this.workers) {
       if (o === w || o.dead) continue;
       const d = Math.hypot(o.x - w.x, o.y - w.y);
       if (d > WORKER_R * 2 + 2) { o.knocked = false; continue; }
-      if (o.knocked || sp < 160) continue;
+      if (o.knocked) continue;
+      const v = knockHit(w, o, WORKER_R);
+      if (!v) continue;
       o.knocked = true;
-      o.vx += w.vx * 0.7; o.vy += w.vy * 0.7 - 120; o.grounded = false;
-      w.vx *= 0.5; w.vy *= 0.5;
+      o.vx += v.vx; o.vy += v.vy; o.grounded = false;
+      w.vx *= KNOCK.KEEP; w.vy *= KNOCK.KEEP;
       this.fx({ k: 'sfx', s: 'bonk' });
       this.fx({ k: 'puff', x: r1((o.x + w.x) / 2), y: r1((o.y + w.y) / 2), c: '#ffcc80' });
     }
@@ -820,8 +822,10 @@ export class Game {
           else if (r === 'miss') this.fx({ k: 'sfx', s: 'release' });
         }
         if (mv.pts) { this.ropePhysics(w, dt, dir, input); return; }
-        // Losgelassen: Schwung bleibt, normaler Fallschaden über der Sicherheitshöhe
+        // Losgelassen: Schwung bleibt, normaler Fallschaden über der Sicherheitshöhe.
+        // Nur jetzt (freier Flug) rempelt man Kollegen um.
         this.physicsWorker(w, dt);
+        if (!w.grounded && !w.dead) this.ropeKnock(w);
         if (w.grounded && !mv.hook) this.mv = null; // gelandet: Gurt wieder eingerollt
         return;
       }

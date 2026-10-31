@@ -4,7 +4,7 @@ import { Net } from './net.js';
 import { Game } from './game.js';
 import { WEAPONS, WEAPON_BY_ID, WEAPON_CATS } from '../shared/weapons.js';
 import { MAX_HP, WORLD_W, WORLD_H, TEAM_COLORS } from '../shared/constants.js';
-import { RULES, AMMO_OPTIONS, AMMO_PRESETS, BOT_LEVELS, MAX_TEAMS, configurableWeapons, ammoFromRules } from '../shared/rules.js';
+import { RULES, AMMO_OPTIONS, AMMO_PRESETS, GAME_MODES, modeRules, BOT_LEVELS, MAX_TEAMS, configurableWeapons, ammoFromRules } from '../shared/rules.js';
 import { renderMapPicker } from './mappicker.js';
 import { unlockAudio, setMuted, isMuted, setMusicOn, isMusicOn, setMusicMode, startAmbience, audioReady } from './audio.js';
 
@@ -278,6 +278,10 @@ function renderRules(isHost) {
   const r = state.rules || {};
   if (!changed('rules', [r, isHost])) return;
   $('rulesnote').textContent = isHost ? '' : '(stellt die Schichtleitung ein)';
+  const mode = GAME_MODES[r.mode] ? r.mode : 'standard';
+  $('modes').innerHTML = Object.entries(GAME_MODES).map(([k, m]) => `<button class="small mode${k === mode ? ' sel' : ''}" data-mode="${k}" title="${esc(m.desc)}" ${isHost ? '' : 'disabled'}>${m.icon} ${esc(m.label)}</button>`).join('');
+  $('modes').querySelectorAll('[data-mode]').forEach((b) => { b.onclick = () => sendRules(modeRules(b.dataset.mode, state.rules)); });
+  $('modedesc').textContent = GAME_MODES[mode].desc;
   $('rules').innerHTML = RULES.map((d) => `<label class="rule"><span>${esc(d.label)}</span>
     <select data-rule="${d.key}" ${isHost ? '' : 'disabled'}>${d.options.map(([v, l]) => `<option value="${v}"${v === r[d.key] ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></label>`).join('');
   $('rules').querySelectorAll('[data-rule]').forEach((sel) => { sel.onchange = () => sendRules({ [sel.dataset.rule]: +sel.value }); });

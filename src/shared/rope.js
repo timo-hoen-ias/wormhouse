@@ -18,6 +18,22 @@ export const ROPE = {
   MAX_WRAPS: 16,
 };
 
+// Seil-Schubser wie in Worms: Nur wer das Seil losgelassen hat und frei durch
+// die Luft fliegt, rempelt Kollegen weg. Am Seil hängend schubst man niemanden.
+export const KNOCK = {
+  MIN_SPEED: 160, // langsamer fliegt man einfach dagegen
+  TRANSFER: 0.7, // Anteil der eigenen Geschwindigkeit, der beim Getroffenen ankommt
+  LIFT: 120, // zusätzlicher Hub nach oben
+  KEEP: 0.5, // so viel Tempo behält der Rempler selbst
+};
+
+// Wird o von w (frei fliegend) umgerempelt? Gibt die Stoßgeschwindigkeit zurück oder null.
+export function knockHit(w, o, r) {
+  if (Math.hypot(w.vx, w.vy) < KNOCK.MIN_SPEED) return null;
+  if (Math.hypot(o.x - w.x, o.y - w.y) > r * 2 + 2) return null;
+  return { vx: w.vx * KNOCK.TRANSFER, vy: w.vy * KNOCK.TRANSFER - KNOCK.LIFT };
+}
+
 const dist = (ax, ay, bx, by) => Math.hypot(bx - ax, by - ay);
 
 // Liegt Gelände in der Nähe? (trägt der Haken / die Kante noch)

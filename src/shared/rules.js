@@ -3,7 +3,7 @@
 // lesen dieselben Definitionen. Waffen-Munition wird aus der Waffenliste
 // abgeleitet, neue Waffen tauchen also automatisch in den Einstellungen auf.
 import { WEAPONS } from './weapons.js';
-import { MAP_CHOICE_IDS, COMPLEXITY, DEFAULT_MAP, DEFAULT_COMPLEXITY } from './maps.js';
+import { MAP_CHOICE_IDS, MAP_BY_ID, COMPLEXITY, DEFAULT_MAP, DEFAULT_COMPLEXITY } from './maps.js';
 
 export const RULES = [
   { key: 'turnTime', label: 'Zugzeit', def: 45,
@@ -40,9 +40,37 @@ export const AMMO_PRESETS = {
   knapp: { label: 'Inventur knapp (alles 1×)', ammo: () => Object.fromEntries(configurableWeapons().map((w) => [w.id, w.ammo < 0 && w.id === 'paket' ? -1 : 1])) },
 };
 
+// Spielmodi: komplette Regel-Vorlagen (Regeln + Waffenlager + Karte).
+// „Rope only“ wie die Rope-Matches in Worms: nur Seil und Schläger (bei uns der
+// Hubwagen), Schaden entsteht fast nur durchs Wegschubsen ins Hafenbecken.
+export const MODE_WEAPONS = { seil: ['seil', 'hubwagen'] };
+export const GAME_MODES = {
+  standard: {
+    label: 'Standard', icon: '📦',
+    desc: 'Volles Lager mit allen Waffen, normale Regeln.',
+    apply: (cur) => ({ ...Object.fromEntries(RULES.map((d) => [d.key, d.def])), ammo: {}, map: MAP_BY_ID[cur.map]?.rope || cur.map === 'zufall-seil' ? DEFAULT_MAP : cur.map }),
+  },
+  seil: {
+    label: 'Rope only', icon: '🧗',
+    desc: 'Seil-Match wie online in Worms: nur Spanngurt-Seil (∞) und Hubwagen. Kurze Züge, kein Fallschaden – wer ins Wasser geschubst wird, ist raus. Schubsen geht nur im freien Flug nach dem Loslassen.',
+    apply: (cur) => ({
+      turnTime: 20, retreatTime: 3, hp: 100, wind: 0, fallDamage: 0, suddenDeath: 10, suddenWater: 1,
+      ammo: Object.fromEntries(configurableWeapons().map((w) => [w.id, MODE_WEAPONS.seil.includes(w.id) ? -1 : 0])),
+      map: MAP_BY_ID[cur.map]?.rope || cur.map === 'zufall-seil' ? cur.map : 'zufall-seil',
+    }),
+  },
+};
+
+// Regeln für einen Spielmodus (ausgehend von den aktuellen Regeln, z.B. für die Karte).
+export function modeRules(mode, cur = defaultRules()) {
+  const m = GAME_MODES[mode] || GAME_MODES.standard;
+  return { ...m.apply(cur), mode: GAME_MODES[mode] ? mode : 'standard' };
+}
+
 export function defaultRules() {
   const r = Object.fromEntries(RULES.map((d) => [d.key, d.def]));
   r.ammo = {};
+  r.mode = 'standard';
   r.map = DEFAULT_MAP; // Karten-ID aus maps.js oder 'zufall' / 'zufall-seil'
   r.complexity = DEFAULT_COMPLEXITY;
   return r;
@@ -54,7 +82,9 @@ export function sanitizeRules(input, base = defaultRules()) {
   const out = { ...def, ...base, ammo: { ...(base.ammo || {}) } };
   if (!MAP_CHOICE_IDS.has(out.map)) out.map = def.map;
   if (!COMPLEXITY.some((c) => c.level === out.complexity)) out.complexity = def.complexity;
+  if (!GAME_MODES[out.mode]) out.mode = def.mode;
   if (!input || typeof input !== 'object') return out;
+  if ('mode' in input && GAME_MODES[input.mode]) out.mode = input.mode;
   if ('map' in input && MAP_CHOICE_IDS.has(input.map)) out.map = input.map;
   if ('complexity' in input && COMPLEXITY.some((c) => c.level === +input.complexity)) out.complexity = +input.complexity;
   for (const d of RULES) {
