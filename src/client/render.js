@@ -358,15 +358,17 @@ function makeProjectileMesh(type) {
 
 // ---------- Renderer ----------
 export class Renderer {
-  constructor(container) {
+  constructor(container, opts = {}) {
     this.container = container;
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    // Handys: weniger Pixel, keine Kantenglättung, einfache Schatten (siehe gfx.js)
+    this.low = !!opts.low;
+    this.renderer = new THREE.WebGLRenderer({ antialias: !this.low, powerPreference: 'high-performance' });
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, this.low ? 1.5 : 2));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.05;
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.shadowMap.type = this.low ? THREE.PCFShadowMap : THREE.PCFSoftShadowMap;
     container.appendChild(this.renderer.domElement);
     this.renderer.domElement.addEventListener('webglcontextlost', (e) => {
       e.preventDefault();
@@ -420,6 +422,7 @@ export class Renderer {
     this.time = 0;
     this.resize();
     window.addEventListener('resize', () => this.resize());
+    window.visualViewport?.addEventListener('resize', () => this.resize());
   }
 
   resize() {
@@ -436,7 +439,7 @@ export class Renderer {
     sun.position.set(W / 2 + 400, H + 900, 900);
     sun.target.position.set(W / 2, H / 2, 0);
     sun.castShadow = true;
-    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.mapSize.set(this.low ? 1024 : 2048, this.low ? 1024 : 2048);
     const sc = sun.shadow.camera;
     sc.left = -W / 2 - 200; sc.right = W / 2 + 200; sc.top = H / 2 + 400; sc.bottom = -H / 2 - 400;
     sc.near = 100; sc.far = 3500;
@@ -564,6 +567,8 @@ export class Renderer {
       this.scene.remove(this.terrainBack);
       this.terrainBack.children.forEach((c) => c.material.dispose());
     }
+    this.terrain = terrain;
+    terrain.dirty = [];
     const geo = new THREE.PlaneGeometry(W, H);
     const m = new THREE.MeshStandardMaterial({ map: terrain.texture, transparent: true, alphaTest: 0.5, roughness: 0.9, side: THREE.DoubleSide });
     this.terrainMesh = new THREE.Mesh(geo, m);
@@ -1089,6 +1094,37 @@ export class Renderer {
     return h / (this.renderer.domElement.clientHeight || 1);
   }
 
+  // Geänderte Geländerechtecke per texSubImage2D hochladen statt der ganzen Textur.
+  uploadTerrain() {
+    const t = this.terrain;
+    if (!t?.dirty?.length) return;
+    const rects = t.dirty.splice(0);
+    const tex = t.texture;
+    const props = this.renderer.properties.get(tex);
+    if (!props.__webglTexture || props.__version !== tex.version) { tex.needsUpdate = true; return; }
+    try {
+      const gl = this.renderer.getContext();
+      this.renderer.state.bindTexture(gl.TEXTURE_2D, props.__webglTexture);
+      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+      gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+      gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
+      const src = t.img.data;
+      for (const [x, y, w, h] of rects) {
+        // Textur liegt (flipY) kopfüber im Speicher: Zeilen umgekehrt kopieren.
+        const buf = new Uint8Array(w * h * 4);
+        for (let r = 0; r < h; r++) {
+          const from = ((y + h - 1 - r) * W + x) * 4;
+          buf.set(src.subarray(from, from + w * 4), r * w * 4);
+        }
+        gl.texSubImage2D(gl.TEXTURE_2D, 0, x, H - y - h, w, h, gl.RGBA, gl.UNSIGNED_BYTE, buf);
+      }
+      if (tex.generateMipmaps) gl.generateMipmap(gl.TEXTURE_2D);
+    } catch (err) {
+      console.warn('Teil-Upload fehlgeschlagen, lade komplett', err);
+      tex.needsUpdate = true;
+    }
+  }
+
   frame(dt, focus) {
     this.time += dt;
     // Kamera weich zum Fokus
@@ -1172,6 +1208,7 @@ export class Renderer {
     }
     this.targetMarker.rotation.z += dt * 2;
 
+    this.uploadTerrain();
     this.renderer.render(this.scene, this.camera);
     this.updateLabels();
   }

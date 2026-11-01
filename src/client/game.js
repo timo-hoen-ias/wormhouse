@@ -55,6 +55,8 @@ export class Game {
     this.charging = false;
     this.keys = new Set();
     this.mouse = { x: W / 2, y: H / 2 };
+    this.touchMode = false; // Handy: Zielwaffen erst antippen, dann mit Feuer bestätigen
+    this.touchTarget = null; // { n, weapon } – für welchen Zug/welche Waffe das Ziel gesetzt wurde
     this.girderAngle = 0;
     this.used = [];
     this.shotsLeft = 0;
@@ -357,7 +359,7 @@ export class Game {
     const wpn = WEAPON_BY_ID[id];
     if (!wpn || this.ammoOf(id) === 0) return;
     if (this.weapon === 'scanner' && this.shotsLeft < (WEAPON_BY_ID.scanner.shots)) return;
-    if (this.weapon !== id) this.homeTarget = null;
+    if (this.weapon !== id) { this.homeTarget = null; this.touchTarget = null; }
     this.weapon = id;
     if (this.turn) this.myWeapons[this.turn.team] = id;
     this.shotsLeft = wpn.shots || 1;
@@ -395,7 +397,7 @@ export class Game {
       if (this.tp !== 'aim' || (wpn.target && !wpn.charge)) return;
       // Vom Seil wird nur abgeworfen (wie in Worms): kein Aufladen
       if (this.onRope() && !wpn.util) { this.fire(0); return; }
-      if (wpn.kind === 'homing' && !this.homeTarget) { this.ui.toast('Erst den Empfänger anklicken!', '#00e5ff'); return; }
+      if (wpn.kind === 'homing' && !this.homeTarget) { this.ui.toast(this.touchMode ? 'Erst den Empfänger antippen!' : 'Erst den Empfänger anklicken!', '#00e5ff'); return; }
       if (wpn.charge) { if (!this.charging) { this.charging = true; this.charge = 0; } }
       else this.fire(1);
     } else if (code === 'Enter' && this.canAct() && w.grounded) {
@@ -419,11 +421,33 @@ export class Game {
     if (wpn.kind === 'homing') {
       this.homeTarget = { x, y };
       sfx.beep();
-      this.ui.toast('Empfänger gespeichert – jetzt mit Leertaste abschicken.', '#00e5ff');
+      this.ui.toast(this.touchMode ? 'Empfänger gespeichert – jetzt mit 🔥 abschicken.' : 'Empfänger gespeichert – jetzt mit Leertaste abschicken.', '#00e5ff');
       return true;
     }
     this.fire(1, { x, y });
     return true;
+  }
+
+  // Touch: Ziel nur vormerken (Marker), abgefeuert wird erst über den Feuer-Knopf.
+  setTouchTarget(x, y) {
+    if (!this.myTurn || this.tp !== 'aim') return false;
+    const wpn = WEAPON_BY_ID[this.weapon];
+    if (!wpn.target) return false;
+    if (wpn.kind === 'homing') return this.click(x, y);
+    this.mouse.x = x; this.mouse.y = y;
+    this.touchTarget = { n: this.turnN, weapon: this.weapon };
+    return true;
+  }
+
+  touchTargetReady() {
+    return !!this.touchTarget && this.touchTarget.n === this.turnN && this.touchTarget.weapon === this.weapon;
+  }
+
+  // Feuer-Knopf für Zielwaffen ohne Aufladen (Tresor, Paletten, Teleport, Träger …)
+  confirmTouchTarget() {
+    if (!this.touchTargetReady()) return false;
+    this.touchTarget = null;
+    return this.click(this.mouse.x, this.mouse.y);
   }
 
   // ---------- Hauptschleife ----------
@@ -1468,7 +1492,7 @@ export class Game {
     } else {
       this.renderer.showAim(null, 0, 1, 0, false);
     }
-    if (this.myTurn && this.tp === 'aim' && wpn.target) {
+    if (this.myTurn && this.tp === 'aim' && wpn.target && !(this.touchMode && wpn.kind !== 'homing' && !this.touchTargetReady())) {
       const t = wpn.kind === 'homing' && this.homeTarget ? this.homeTarget : this.mouse;
       this.renderer.showTarget(wpn.kind === 'girder' ? 'girder' : 'point', t.x, t.y, this.girderAngle);
     } else {

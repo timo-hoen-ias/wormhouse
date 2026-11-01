@@ -76,7 +76,7 @@ button:disabled { opacity: 0.4; cursor: default; }
 .teambar .lvl.edit { pointer-events: auto; cursor: pointer; border: 1px solid #ffd40088; }
 .teambar .lvl.edit:hover { background: #ffd400; color: #222; }
 label.inline { flex-direction: row; align-items: center; gap: 10px; margin: 2px 0 6px; }
-label.inline select { flex: 1; }
+label.inline select { flex: 1; min-width: 0; max-width: 100%; text-overflow: ellipsis; }
 #turninfo { text-align: center; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 6px 18px; min-width: 160px; }
 #turnname { font-size: 13px; font-weight: 700; }
 #timer { font-size: 30px; font-weight: 900; font-variant-numeric: tabular-nums; }
@@ -190,3 +190,99 @@ select:disabled { opacity: 0.75; }
 #modes button.mode { font-size: 13px; padding: 6px 12px; }
 #modes button.mode.sel { background: var(--hazard); color: #1a1a1a; border-color: var(--hazard); opacity: 1; }
 #modedesc { text-align: left; margin: 0 0 10px; }
+
+/* ---------- Handy / Touch ---------- */
+.touchctl, .touchonly, #rotate { display: none; }
+body.touch .touchonly { display: block; }
+body.touch .desktoponly { display: none; }
+body.touch { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; }
+body.touch input, body.touch select { -webkit-user-select: text; user-select: text; }
+#stage canvas { touch-action: none; }
+button { touch-action: manipulation; }
+#audioctl { right: max(10px, env(safe-area-inset-right)); bottom: max(10px, env(safe-area-inset-bottom)); }
+#topbar { padding-left: max(14px, env(safe-area-inset-left)); padding-right: max(14px, env(safe-area-inset-right)); padding-top: max(10px, env(safe-area-inset-top)); }
+
+/* Steuerelemente nur im eigenen Zug */
+body.touch.ingame.myturn #stick, body.touch.ingame.myturn #tbtns { display: flex; }
+body.touch.ingame #tbar { display: flex; }
+body.touch #hint, body.touch.ingame #chat { display: none; }
+body.touch.ingame.chatopen #chat { display: block; left: 50%; transform: translateX(-50%); top: 70px; bottom: auto; width: min(420px, 80vw); z-index: 30; }
+body.touch #chatinput { font-size: 16px; opacity: 1; }
+
+#stick { position: absolute; left: max(16px, env(safe-area-inset-left)); bottom: max(14px, env(safe-area-inset-bottom));
+  width: clamp(112px, 30vmin, 150px); aspect-ratio: 1; border-radius: 50%; touch-action: none;
+  background: radial-gradient(circle, rgba(255,255,255,0.08) 0 40%, rgba(22,26,34,0.55) 41%); border: 2px solid rgba(255,255,255,0.18);
+  align-items: center; justify-content: center; }
+#stick .knob { width: 42%; aspect-ratio: 1; border-radius: 50%; background: rgba(255,196,0,0.85); box-shadow: 0 2px 8px #000a; pointer-events: none; }
+#stick .a { position: absolute; font-style: normal; font-size: 13px; color: #fff8; pointer-events: none; }
+#stick .a.l { left: 7%; top: 50%; transform: translateY(-50%); }
+#stick .a.r { right: 7%; top: 50%; transform: translateY(-50%); }
+#stick .a.u { top: 5%; left: 50%; transform: translateX(-50%); }
+#stick .a.d { bottom: 5%; left: 50%; transform: translateX(-50%); }
+#stick[data-dir~="ArrowLeft"] .a.l, #stick[data-dir~="ArrowRight"] .a.r, #stick[data-dir~="ArrowUp"] .a.u, #stick[data-dir~="ArrowDown"] .a.d { color: var(--hazard); }
+
+.tb { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; padding: 0;
+  width: 54px; height: 54px; border-radius: 50%; font-size: 22px; line-height: 1; touch-action: none;
+  background: rgba(22,26,34,0.75); border: 2px solid rgba(255,255,255,0.2); color: #fff; }
+.tb small { font-size: 9px; font-weight: 700; color: var(--muted); letter-spacing: 0.3px; }
+.tb.on { background: #3d3420; border-color: var(--hazard); transform: scale(0.95); }
+.tb:disabled { opacity: 0.4; }
+#tbtns { position: absolute; right: max(16px, env(safe-area-inset-right)); bottom: max(14px, env(safe-area-inset-bottom)); gap: 10px; align-items: flex-end; }
+#tbtns #t-flip { margin-bottom: 0; }
+#tbtns #t-jump { margin-bottom: 34px; }
+.tb.fire { width: clamp(78px, 22vmin, 96px); height: clamp(78px, 22vmin, 96px); font-size: 32px; background: rgba(183,28,28,0.8); border-color: #ff8a65; }
+.tb.fire small { color: #fff; font-size: 10px; }
+.tb.fire.confirm { background: rgba(0,131,143,0.85); border-color: #4dd0e1; }
+.tb.fire.dim { opacity: 0.5; }
+.tb.fire.on { background: #ff6d00; }
+#tbar { position: absolute; left: 50%; transform: translateX(-50%); bottom: max(8px, env(safe-area-inset-bottom)); gap: 10px; align-items: flex-end; }
+#tbar .tb { width: 46px; height: 46px; font-size: 20px; }
+#tbar #t-weapon { width: 62px; height: 62px; font-size: 26px; border-color: var(--hazard); }
+
+/* Waffenlager als Aufklapp-Menü */
+body.touch #weapons { display: none; }
+body.touch #weapons.open { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; position: fixed; z-index: 40;
+  left: 50%; top: 50%; bottom: auto; transform: translate(-50%, -50%); width: min(640px, calc(100vw - 24px)); max-width: none;
+  max-height: calc(100% - 24px); overflow-y: auto; padding: 10px; box-shadow: 0 10px 40px #000c; }
+body.touch #weapons.open .wgroup { border-left: 0; padding: 4px; background: rgba(255,255,255,0.04); border-radius: 8px; }
+body.touch .wbtn { width: 50px; height: 50px; font-size: 24px; }
+body.touch .wbtn .key { display: none; }
+body.touch #weaponinfo { bottom: calc(max(8px, env(safe-area-inset-bottom)) + 70px); font-size: 12px; padding: 4px 10px; max-width: 50%; }
+
+/* Ton/Vollbild im Spiel oben rechts, damit unten Platz für die Steuerung ist */
+body.touch.ingame #audioctl { bottom: auto; top: calc(max(10px, env(safe-area-inset-top)) + 64px); }
+body.touch #audioctl button { padding: 4px 8px; font-size: 14px; }
+
+/* Querformat-Hinweis im Spiel */
+#rotate { position: fixed; inset: 0; z-index: 60; background: var(--bg); flex-direction: column; align-items: center; justify-content: center; gap: 10px; text-align: center; padding: 24px; }
+#rotate div { font-size: 64px; animation: tilt 1.6s ease-in-out infinite; }
+#rotate b { font-size: 20px; color: var(--hazard); }
+#rotate span { color: var(--muted); font-size: 14px; }
+@keyframes tilt { 0%, 30% { transform: rotate(0); } 60%, 100% { transform: rotate(-90deg); } }
+@media (orientation: portrait) { body.touch.ingame #rotate { display: flex; } }
+
+/* Niedrige Bildschirme (Handy quer): kompaktes HUD */
+@media (max-height: 520px) {
+  #topbar { padding-top: max(6px, env(safe-area-inset-top)); gap: 8px; }
+  #teams { min-width: 0; max-width: 34vw; gap: 2px; }
+  .teambar { font-size: 10px; gap: 5px; }
+  .teambar .bar { height: 6px; min-width: 40px; }
+  .teambar .lvl { font-size: 9px; }
+  #turninfo { padding: 3px 12px; min-width: 0; }
+  #turnname { font-size: 11px; }
+  #timer { font-size: 22px; }
+  #wind { padding: 3px 10px; min-width: 90px; font-size: 10px; }
+  #sudden { top: 50px; }
+  #toast { top: 64px; font-size: 15px; }
+  body.touch.ingame #audioctl { top: calc(max(6px, env(safe-area-inset-top)) + 46px); }
+  .wlabel { font-size: 10px; }
+  .wlabel .hp { font-size: 9px; }
+  .overlay .panel { padding: 16px 18px; }
+  .logo { font-size: 34px; }
+  .logo.small { font-size: 28px; }
+}
+@media (max-width: 520px) {
+  .panel { padding: 20px 16px; }
+  .logo { font-size: 38px; }
+  .row { flex-wrap: wrap; }
+}

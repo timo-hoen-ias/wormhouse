@@ -6,6 +6,7 @@ import { WEAPONS, WEAPON_BY_ID, WEAPON_CATS } from '../shared/weapons.js';
 import { MAX_HP, WORLD_W, WORLD_H, TEAM_COLORS } from '../shared/constants.js';
 import { RULES, AMMO_OPTIONS, AMMO_PRESETS, GAME_MODES, modeRules, BOT_LEVELS, MAX_TEAMS, configurableWeapons, ammoFromRules } from '../shared/rules.js';
 import { renderMapPicker } from './mappicker.js';
+import { isTouch, lowGfx, setupTouch, closeWeapons } from './touch.js';
 import { unlockAudio, setMuted, isMuted, setMusicOn, isMusicOn, setMusicMode, startAmbience, audioReady } from './audio.js';
 
 const $ = (id) => document.getElementById(id);
@@ -30,7 +31,7 @@ const params = new URLSearchParams(location.search);
 if (params.get('r')) $('code').value = params.get('r').toUpperCase();
 
 // ---------- Rendering ----------
-const renderer = new Renderer($('stage'));
+const renderer = new Renderer($('stage'), { low: lowGfx });
 let net = null;
 let room = null;
 let state = null;
@@ -52,6 +53,7 @@ const ui = {
 };
 
 const game = new Game({ renderer, net: { send: (m) => net?.send(m) }, ui });
+const touch = setupTouch({ game, unlockAudio, toast: (t, c) => ui.toast(t, c) });
 
 // ---------- Lobby ----------
 function makeCode() {
@@ -303,6 +305,7 @@ function renderLobby() {
   const inLobby = state.phase === 'lobby';
   $('menu').classList.toggle('hidden', !inLobby);
   $('hud').classList.toggle('hidden', inLobby);
+  document.body.classList.toggle('ingame', !inLobby);
   $('gameover').classList.toggle('hidden', state.phase !== 'ended');
   if (inLobby) {
     renderTeams(isHost);
@@ -346,13 +349,14 @@ function renderWeapons() {
       b.innerHTML = `${j === 0 ? `<span class="key">${KEY_LABELS[ci]}</span>` : ''}${w.icon}<span class="ammo">${ammo < 0 ? '∞' : ammo}</span>`;
       b.title = `${w.name} – ${w.desc}`;
       b.disabled = !myTurn || ammo === 0;
-      b.onclick = () => { game.selectWeapon(w.id); };
+      b.onclick = () => { game.selectWeapon(w.id); if (isTouch) closeWeapons(); };
       grp.appendChild(b);
     });
     el.appendChild(grp);
   });
   const w = WEAPON_BY_ID[game.weapon];
-  $('weaponinfo').innerHTML = game.myTurn ? `<b>${w.icon} ${esc(w.name)}</b> – ${esc(w.desc)}` : '';
+  const touchNote = !isTouch || !w.target ? '' : w.kind === 'homing' ? ' – Empfänger antippen, dann 🔥' : ' – Ziel antippen, dann 🎯';
+  $('weaponinfo').innerHTML = !game.myTurn ? '' : isTouch ? `<b>${w.icon} ${esc(w.name)}</b>${touchNote}` : `<b>${w.icon} ${esc(w.name)}</b> – ${esc(w.desc)}`;
   $('weaponinfo').classList.toggle('hidden', !game.myTurn);
 }
 
@@ -366,6 +370,7 @@ function lvlTag(t, i) {
 let lastSecond = -1;
 function updateHud() {
   if (!state || state.phase === 'lobby') return;
+  touch.update(state.phase === 'playing');
   const turn = state.turn;
   const team = turn ? state.teams[turn.team] : null;
   // Teams
@@ -463,16 +468,37 @@ window.addEventListener('blur', () => {
 
 const canvas = renderer.renderer.domElement;
 let drag = null;
+// Touch: ein Finger zieht die Kamera, zwei Finger zoomen (Pinch), kurzer Tipp setzt das Ziel.
+const touches = new Map();
+let pinch = null;
+let tap = null;
+const clampZoom = (z) => Math.max(380, Math.min(2200, z));
+const pinchDist = () => { const [a, b] = [...touches.values()]; return Math.hypot(a.x - b.x, a.y - b.y) || 1; };
 canvas.addEventListener('pointerdown', (e) => {
   unlockAudio();
   const p = renderer.screenToWorld(e.clientX, e.clientY);
+  if (e.pointerType === 'touch') {
+    closeWeapons();
+    touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    canvas.setPointerCapture(e.pointerId);
+    if (touches.size === 2) { pinch = { d: pinchDist(), zoom: renderer.zoom }; drag = null; tap = null; }
+    else if (touches.size === 1) { drag = { x: e.clientX, y: e.clientY, moved: false }; tap = { x: e.clientX, y: e.clientY, t: performance.now() }; }
+    return;
+  }
   if (e.button === 0 && game.click(p.x, p.y)) return;
   drag = { x: e.clientX, y: e.clientY, moved: false };
   canvas.setPointerCapture(e.pointerId);
 });
 canvas.addEventListener('pointermove', (e) => {
-  const p = renderer.screenToWorld(e.clientX, e.clientY);
-  game.mouse.x = p.x; game.mouse.y = p.y;
+  if (e.pointerType === 'touch') {
+    if (!touches.has(e.pointerId)) return;
+    touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pinch && touches.size >= 2) { renderer.zoom = clampZoom(pinch.zoom * pinch.d / pinchDist()); return; }
+    if (tap && Math.hypot(e.clientX - tap.x, e.clientY - tap.y) > 10) tap = null;
+  } else {
+    const p = renderer.screenToWorld(e.clientX, e.clientY);
+    game.mouse.x = p.x; game.mouse.y = p.y;
+  }
   if (drag) {
     const k = renderer.worldPerPixel();
     const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
@@ -485,14 +511,42 @@ canvas.addEventListener('pointermove', (e) => {
     drag.x = e.clientX; drag.y = e.clientY;
   }
 });
-canvas.addEventListener('pointerup', () => { drag = null; });
+const pointerEnd = (e) => {
+  if (e.pointerType === 'touch') {
+    touches.delete(e.pointerId);
+    if (pinch) { if (touches.size < 2) pinch = null; drag = null; tap = null; return; }
+    if (tap && e.type === 'pointerup' && performance.now() - tap.t < 500) {
+      const p = renderer.screenToWorld(e.clientX, e.clientY);
+      game.setTouchTarget(p.x, p.y);
+    }
+    tap = null;
+  }
+  drag = null;
+};
+canvas.addEventListener('pointerup', pointerEnd);
+canvas.addEventListener('pointercancel', pointerEnd);
 canvas.addEventListener('wheel', (e) => {
   e.preventDefault();
-  renderer.zoom = Math.max(380, Math.min(2200, renderer.zoom * (e.deltaY > 0 ? 1.1 : 0.9)));
+  renderer.zoom = clampZoom(renderer.zoom * (e.deltaY > 0 ? 1.1 : 0.9));
 }, { passive: false });
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 // Taste C: Kamera zurück zum aktiven Arbeiter
 window.addEventListener('keydown', (e) => { if (e.code === 'KeyC' && !typing(e)) game.manualCam = false; });
+
+// Handy gesperrt / App gewechselt: JavaScript friert dort ein. Verbindung bewusst
+// trennen, damit der Server den Zug weitergibt und die Schichtleitung (KI-Teams)
+// an jemand anderen übergibt; beim Zurückkehren frisch verbinden.
+if (isTouch) {
+  const away = () => {
+    game.charging = false;
+    game.keys.clear();
+    net?.suspend();
+  };
+  const back = () => net?.resume();
+  document.addEventListener('visibilitychange', () => (document.hidden ? away() : back()));
+  window.addEventListener('pagehide', away);
+  window.addEventListener('pageshow', () => { if (!document.hidden) back(); });
+}
 
 // ---------- Hauptschleife ----------
 let last = performance.now();

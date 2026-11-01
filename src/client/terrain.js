@@ -112,8 +112,13 @@ export class Terrain {
 
   flush(x0, y0, w, h) {
     x0 = Math.max(0, Math.floor(x0)); y0 = Math.max(0, Math.floor(y0));
-    this.ctx.putImageData(this.img, 0, 0, x0, y0, Math.ceil(w), Math.ceil(h));
-    this.texture.needsUpdate = true;
+    w = Math.min(W - x0, Math.ceil(w)); h = Math.min(H - y0, Math.ceil(h));
+    if (w <= 0 || h <= 0) return;
+    this.ctx.putImageData(this.img, 0, 0, x0, y0, w, h);
+    // Mit Teil-Upload (Renderer setzt `dirty`) nur das geänderte Rechteck zur GPU
+    // schicken – ein Komplett-Upload der 2400×1200-Textur ruckelt auf Handys.
+    if (this.dirty) this.dirty.push([x0, y0, w, h]);
+    else this.texture.needsUpdate = true;
   }
 
   // ---------- Zerstörung / Bauen ----------

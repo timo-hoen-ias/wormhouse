@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" fill="#12151b"/>
+  <defs><pattern id="h" width="56" height="56" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="28" height="56" fill="#ffc400"/><rect x="28" width="28" height="56" fill="#1b1b1b"/></pattern></defs>
+  <rect y="0" width="512" height="44" fill="url(#h)"/>
+  <g transform="translate(256 286)">
+    <polygon points="-150,-70 0,-140 150,-70 0,0" fill="#e0b27a"/>
+    <polygon points="-150,-70 0,0 0,170 -150,100" fill="#c48f52"/>
+    <polygon points="150,-70 0,0 0,170 150,100" fill="#a8743d"/>
+    <polygon points="-40,-121 110,-51 110,-21 70,-40 70,-10 -80,-80 -80,-102" fill="#f2deb8" opacity="0.9"/>
+    <text x="-75" y="120" font-family="Arial Black, Arial, sans-serif" font-weight="900" font-size="150" fill="#ffc400" text-anchor="middle" transform="skewY(25)" dy="-10">W</text>
+  </g>
+</svg>

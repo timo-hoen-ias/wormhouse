@@ -117,6 +117,20 @@ Alles wird live im Browser synthetisiert (WebAudio), es gibt keine Audiodateien:
 Soundeffekte, prozedurale Hintergrundmusik (ruhig im Menü, Lagerfunk im Spiel, Melodien werden immer neu erzeugt) und Lagerhallen-Atmosphäre (Raumhall, Neonröhren, Hafenwasser, Rückfahrwarner, vorbeifahrende Stapler, Durchsagen, Möwen).
 🎵 schaltet Musik + Atmosphäre, 🔊 den gesamten Ton. Die Einstellung wird gespeichert.
 
+### Am Handy spielen
+
+Auf Handys und Tablets (Touch, erkannt über `pointer: coarse`, erzwingbar mit `?touch=1` / `?touch=0`) erscheint eine eigene Steuerung (`src/client/touch.js`). Sie speist dieselben Tastencodes ins Spiel wie die Tastatur.
+
+- **Querformat**: Im Spiel bittet ein Hinweis, das Handy zu drehen. Das HUD wird auf niedrigen Bildschirmen kompakter, Notch/Home-Balken werden freigehalten.
+- **Steuerkreuz links**: ◀ ▶ laufen (am Seil schwingen), ▲ ▼ zielen (am Seil einholen/ausfahren, Drohne lenken).
+- **Rechts**: 🔥 halten = Kraft, loslassen = Wurf (auch Seil schießen/loslassen), ⤴ Sprung, ↶ Rückwärtssalto.
+- **Unten**: **Waffen** öffnet das Waffenlager als Menü, 🎥 holt die Kamera zum Arbeiter, 💬 Chat.
+- **Zielwaffen** (Panzerschrank, Paletten, Inventurfehler, Kartonbrücke …): Ziel im Lager antippen, dann 🎯 drücken. So löst Kamera-Verschieben nichts aus.
+- **Kamera**: ein Finger ziehen, zwei Finger zoomen.
+- **App/Vollbild**: Wormhouse ist eine PWA (`public/manifest.webmanifest`, Querformat, Vollbild). iPhone: Teilen → „Zum Home-Bildschirm“ (Safari kann auf dem iPhone sonst kein Vollbild). Android: Installieren-Knopf im Menü oder ⛶.
+- **Grafik**: Auf Touch-Geräten niedrigere Pixeldichte, keine Kantenglättung, einfachere Schatten (`?gfx=high` / `?gfx=low` erzwingt). Explosionen laden nur das geänderte Stück der Geländetextur hoch.
+- **Handy gesperrt / App gewechselt**: Die Verbindung wird bewusst getrennt. Der Server gibt den Zug weiter und übergibt die Schichtleitung (und damit die KI-Teams) an einen anderen verbundenen Spieler. Beim Zurückkehren verbindet sich das Spiel neu.
+
 ## Technik
 
 ```
