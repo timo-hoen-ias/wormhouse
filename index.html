@@ -2,7 +2,7 @@
 <html lang="de">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
   <meta name="theme-color" content="#12151b" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -12,7 +12,8 @@
   <link rel="apple-touch-icon" href="/icons/icon-180.png" />
   <title>Wormhouse – Lagerkoller im Hochregal</title>
   <meta name="description" content="Rundenbasiertes Multiplayer-Artillery-Spiel mit Lagerarbeitern in einer zerstörbaren Lagerhalle." />
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📦</text></svg>" />
+  <link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
+  <link rel="icon" href="/icons/icon-192.png" type="image/png" sizes="192x192" />
   <link rel="stylesheet" href="/src/client/style.css" />
 </head>
 <body>
@@ -51,7 +52,7 @@
     <button id="fullscreen" class="hidden" title="Vollbild an/aus">⛶</button>
   </div>
 
-  <div id="rotate"><div>📱↻</div><b>Bitte das Handy quer halten</b><span>Wormhouse spielt sich im Querformat.</span></div>
+  <div id="rotate"><div>📱↻</div><b>Bitte das Handy quer halten</b><span>Wormhouse spielt sich im Querformat.</span><span class="ioshint">Dreht sich nichts? Im Kontrollzentrum die Hochformat-Sperre 🔒 ausschalten.</span></div>
 
   <!-- Startbildschirm -->
   <div id="menu" class="overlay">
@@ -65,6 +66,7 @@
           <button id="create" class="primary">Mehrspieler-Lobby</button>
         </div>
         <label class="inline">KI-Stärke<select id="sololevel"></select></label>
+        <div id="offlinenote" class="small-note hidden">📴 Offline: Einzelspieler und Hotseat laufen ganz normal – für Mehrspieler braucht es Internet.</div>
         <div id="installhint" class="small-note hidden"></div>
         <div class="small-note">Einzelspieler: du gegen KI-Teams – oder stell Gegner auf „👤 Spieler“ und spielt abwechselnd an einem Gerät. Mehrspieler: Raumlink an Kolleg:innen schicken (KI-Teams gehen auch).</div>
         <div class="or">oder Raumcode eingeben</div>

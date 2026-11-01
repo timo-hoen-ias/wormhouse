@@ -121,13 +121,14 @@ Soundeffekte, prozedurale Hintergrundmusik (ruhig im Menü, Lagerfunk im Spiel, 
 
 Auf Handys und Tablets (Touch, erkannt über `pointer: coarse`, erzwingbar mit `?touch=1` / `?touch=0`) erscheint eine eigene Steuerung (`src/client/touch.js`). Sie speist dieselben Tastencodes ins Spiel wie die Tastatur.
 
-- **Querformat**: Im Spiel bittet ein Hinweis, das Handy zu drehen. Das HUD wird auf niedrigen Bildschirmen kompakter, Notch/Home-Balken werden freigehalten.
+- **Querformat**: Beim Spielstart wechselt das Handy (Android/Chrome) ins Vollbild und sperrt die Drehung im Querformat (`screen.orientation.lock`); als installierte App reicht das Manifest. iOS kann das nicht sperren – dort erscheint im Hochformat „Bitte das Handy quer halten“. Das HUD wird auf niedrigen Bildschirmen kompakter, Notch/Home-Balken werden freigehalten.
 - **Steuerkreuz links**: ◀ ▶ laufen (am Seil schwingen), ▲ ▼ zielen (am Seil einholen/ausfahren, Drohne lenken).
 - **Rechts**: 🔥 halten = Kraft, loslassen = Wurf (auch Seil schießen/loslassen), ⤴ Sprung, ↶ Rückwärtssalto.
 - **Unten**: **Waffen** öffnet das Waffenlager als Menü, 🎥 holt die Kamera zum Arbeiter, 💬 Chat.
 - **Zielwaffen** (Panzerschrank, Paletten, Inventurfehler, Kartonbrücke …): Ziel im Lager antippen, dann 🎯 drücken. So löst Kamera-Verschieben nichts aus.
 - **Kamera**: ein Finger ziehen, zwei Finger zoomen.
-- **App/Vollbild**: Wormhouse ist eine PWA (`public/manifest.webmanifest`, Querformat, Vollbild). iPhone: Teilen → „Zum Home-Bildschirm“ (Safari kann auf dem iPhone sonst kein Vollbild). Android: Installieren-Knopf im Menü oder ⛶.
+- **App/Vollbild & offline**: Wormhouse ist eine installierbare PWA (`public/manifest.webmanifest`, `src/client/pwa.js`). Ein Service Worker (beim Build aus `scripts/sw-template.js` erzeugt, siehe `vite.config.js`) cacht beim ersten Besuch das komplette Spiel. **Einzelspieler und Hotseat laufen danach komplett offline**: Die Raum-Logik (`src/shared/room-logic.js`) läuft dafür direkt im Browser (`src/client/localroom.js`) statt im Durable Object. Mehrspieler braucht Netz; offline sind die Knöpfe gesperrt, und eine abgerissene Verbindung verbindet sich sofort neu, wenn das Netz zurück ist. Installieren: Chrome/Edge/Android zeigen im Menü „📲 Als App installieren“, iPhone/iPad: Teilen → „Zum Home-Bildschirm“.
+- **Kein iOS-Zoom**: `touch-action: manipulation` auf allen Elementen, `maximum-scale=1` (verhindert auch das Reinzoomen beim Tippen in Eingabefelder), Safari-`gesture*`-Events und ein Doppeltipp-Fänger in `pwa.js`. Das Spiel-Zoom (zwei Finger auf der Halle) läuft über Pointer-Events und bleibt.
 - **Grafik**: Auf Touch-Geräten niedrigere Pixeldichte, keine Kantenglättung, einfachere Schatten (`?gfx=high` / `?gfx=low` erzwingt). Explosionen laden nur das geänderte Stück der Geländetextur hoch.
 - **Handy gesperrt / App gewechselt**: Die Verbindung wird bewusst getrennt. Der Server gibt den Zug weiter und übergibt die Schichtleitung (und damit die KI-Teams) an einen anderen verbundenen Spieler. Beim Zurückkehren verbindet sich das Spiel neu.
 

@@ -6,11 +6,15 @@ export class Net {
     this.queue = [];
     this.retry = 0;
     this.closed = false;
+    // Netz wieder da (z.B. aus dem Funkloch zurück): sofort neu verbinden statt Backoff abzuwarten.
+    this.onOnline = () => { this.retry = 0; this.connect(); };
+    window.addEventListener('online', this.onOnline);
     this.connect();
   }
 
   connect() {
     if (this.closed || this.suspended) return;
+    if (this.ws && this.ws.readyState <= 1) return; // verbindet schon / ist verbunden
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     const ws = new WebSocket(`${proto}://${location.host}/api/room/${encodeURIComponent(this.room)}/ws`);
     this.ws = ws;
@@ -27,6 +31,7 @@ export class Net {
     ws.onclose = () => {
       if (this.closed || this.ws !== ws) return;
       this.handlers.close?.();
+      this.ws = null;
       const delay = Math.min(8000, 500 * 2 ** this.retry++);
       setTimeout(() => this.connect(), delay);
     };
@@ -59,6 +64,7 @@ export class Net {
 
   close() {
     this.closed = true;
+    window.removeEventListener('online', this.onOnline);
     this.ws?.close();
   }
 }

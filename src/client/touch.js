@@ -11,8 +11,7 @@ export const isTouch = force === '1' || (force !== '0' && matchMedia('(pointer: 
 // Grafikstufe: auf Touch-Geräten sparsamer. ?gfx=high / ?gfx=low erzwingt.
 export const lowGfx = params.get('gfx') === 'low' || (params.get('gfx') !== 'high' && isTouch);
 
-const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-const standalone = matchMedia('(display-mode: standalone), (display-mode: fullscreen)').matches || navigator.standalone === true;
+export const standalone = matchMedia('(display-mode: standalone), (display-mode: fullscreen)').matches || navigator.standalone === true;
 
 const $ = (id) => document.getElementById(id);
 
@@ -41,12 +40,8 @@ function holdButton(el, down, up) {
 export function setupTouch({ game, unlockAudio, toast }) {
   document.body.classList.toggle('touch', isTouch);
   setupFullscreen();
-  setupInstallHints();
   if (!isTouch) return { update() {} };
   game.touchMode = true;
-
-  // iOS: Seiten-Zoom per Zwei-Finger-Geste unterbinden (Pinch gehört dem Spiel)
-  document.addEventListener('gesturestart', (e) => e.preventDefault());
 
   // ---- Steuerkreuz (Stick): links/rechts laufen bzw. schwingen, hoch/runter zielen bzw. Seil
   const stick = $('stick');
@@ -154,13 +149,32 @@ export function toggleWeapons(open) {
 }
 export function closeWeapons() { toggleWeapons(false); }
 
+// ---- Querformat beim Spielen: Android/Chrome sperrt die Drehung im Querformat
+// (geht nur im Vollbild oder als installierte App). Im Browser-Tab wird dafür beim
+// Spielstart (Klick = Nutzergeste) kurz ins Vollbild gewechselt. iOS kann das
+// nicht – dort zeigt #rotate im Hochformat „Bitte quer halten“.
+const noFullscreen = /iPhone|iPod/.test(navigator.userAgent);
+export async function lockLandscape({ fullscreen = false } = {}) {
+  if (!isTouch || !screen.orientation?.lock) return;
+  const root = document.documentElement;
+  const req = root.requestFullscreen || root.webkitRequestFullscreen;
+  const cur = document.fullscreenElement || document.webkitFullscreenElement;
+  try {
+    if (fullscreen && !standalone && !cur && req && !noFullscreen) await req.call(root, { navigationUI: 'hide' });
+    await screen.orientation.lock('landscape');
+  } catch { /* nicht unterstützt (iOS, Desktop) oder abgelehnt – Hinweis-Overlay übernimmt */ }
+}
+export function unlockOrientation() {
+  try { screen.orientation?.unlock?.(); } catch { /* egal */ }
+}
+
 // ---- Vollbild (Android/iPad/Desktop). iPhone-Safari kann das nicht – dort hilft nur die PWA.
 function setupFullscreen() {
   const btn = $('fullscreen');
   const root = document.documentElement;
   const req = root.requestFullscreen || root.webkitRequestFullscreen;
   // iPhone meldet die API teils, kann aber keine Seite im Vollbild zeigen
-  if (!btn || !req || standalone || /iPhone|iPod/.test(navigator.userAgent)) return;
+  if (!btn || !req || standalone || noFullscreen) return;
   btn.classList.remove('hidden');
   btn.onclick = async () => {
     const cur = document.fullscreenElement || document.webkitFullscreenElement;
@@ -168,29 +182,8 @@ function setupFullscreen() {
       if (cur) await (document.exitFullscreen || document.webkitExitFullscreen).call(document);
       else {
         await req.call(root, { navigationUI: 'hide' });
-        if (isTouch) await screen.orientation?.lock?.('landscape').catch(() => {});
+        await lockLandscape();
       }
     } catch { /* abgelehnt – egal */ }
   };
-}
-
-// ---- „Zum Home-Bildschirm“: Android bietet einen Installieren-Dialog, iOS braucht einen Hinweis.
-function setupInstallHints() {
-  if (!isTouch || standalone) return;
-  const hint = $('installhint');
-  if (!hint) return;
-  if (isIOS) {
-    hint.innerHTML = '📲 Tipp fürs iPhone: <b>Teilen → „Zum Home-Bildschirm“</b> – dann läuft Wormhouse im Vollbild wie eine App.';
-    hint.classList.remove('hidden');
-    return;
-  }
-  window.addEventListener('beforeinstallprompt', (e) => {
-    e.preventDefault();
-    hint.innerHTML = '<button id="install" class="small">📲 Als App installieren (Vollbild)</button>';
-    hint.classList.remove('hidden');
-    $('install').onclick = async () => {
-      hint.classList.add('hidden');
-      e.prompt();
-    };
-  });
 }
