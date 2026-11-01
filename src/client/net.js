@@ -10,6 +10,7 @@ export class Net {
   }
 
   connect() {
+    if (this.closed || this.suspended) return;
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     const ws = new WebSocket(`${proto}://${location.host}/api/room/${encodeURIComponent(this.room)}/ws`);
     this.ws = ws;
@@ -24,7 +25,7 @@ export class Net {
       this.handlers.message?.(msg);
     };
     ws.onclose = () => {
-      if (this.closed) return;
+      if (this.closed || this.ws !== ws) return;
       this.handlers.close?.();
       const delay = Math.min(8000, 500 * 2 ** this.retry++);
       setTimeout(() => this.connect(), delay);
@@ -35,6 +36,25 @@ export class Net {
     const data = JSON.stringify(obj);
     if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(data);
     else if (obj.t !== 'snap' && obj.t !== 'fx') this.queue.push(data);
+  }
+
+  // Handy gesperrt / App gewechselt: Verbindung bewusst trennen, damit der Server
+  // sofort Bescheid weiß (Zug weitergeben, Schichtleitung übergeben), statt eine
+  // eingefrorene Verbindung für lebendig zu halten.
+  suspend() {
+    if (this.closed || this.suspended) return;
+    this.suspended = true;
+    const ws = this.ws;
+    this.ws = null;
+    try { ws?.close(); } catch { /* egal */ }
+  }
+
+  // Zurück im Vordergrund: frisch verbinden (die alte Verbindung kann halb tot sein).
+  resume() {
+    if (this.closed || !this.suspended) return;
+    this.suspended = false;
+    this.retry = 0;
+    this.connect();
   }
 
   close() {
