@@ -1,12 +1,14 @@
 // Einstiegspunkt: Lobby, HUD, Eingaben und Hauptschleife.
 import { Renderer } from './render.js';
 import { Net } from './net.js';
+import { LocalNet } from './localroom.js';
+import { setupPwa, isOnline } from './pwa.js';
 import { Game } from './game.js';
 import { WEAPONS, WEAPON_BY_ID, WEAPON_CATS } from '../shared/weapons.js';
 import { MAX_HP, WORLD_W, WORLD_H, TEAM_COLORS } from '../shared/constants.js';
 import { RULES, AMMO_OPTIONS, AMMO_PRESETS, GAME_MODES, modeRules, BOT_LEVELS, MAX_TEAMS, configurableWeapons, ammoFromRules } from '../shared/rules.js';
 import { renderMapPicker } from './mappicker.js';
-import { isTouch, lowGfx, setupTouch, closeWeapons } from './touch.js';
+import { isTouch, lowGfx, setupTouch, closeWeapons, lockLandscape, unlockOrientation } from './touch.js';
 import { unlockAudio, setMuted, isMuted, setMusicOn, isMusicOn, setMusicMode, startAmbience, audioReady } from './audio.js';
 
 const $ = (id) => document.getElementById(id);
@@ -52,6 +54,8 @@ const ui = {
   onNewGame() { $('chatlog').innerHTML = ''; },
 };
 
+setupPwa({ toast: (t, c) => ui.toast(t, c), isMultiplayer: () => !!net && !net.local });
+
 const game = new Game({ renderer, net: { send: (m) => net?.send(m) }, ui });
 const touch = setupTouch({ game, unlockAudio, toast: (t, c) => ui.toast(t, c) });
 
@@ -73,6 +77,10 @@ function playerName() {
 function joinRoom(code, wantSolo = false) {
   code = code.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
   if (code.length < 3) { $('code').focus(); return; }
+  if (!wantSolo && !isOnline()) {
+    ui.toast('📴 Offline – Mehrspieler braucht Internet. Einzelspieler geht auch ohne!', '#ffb74d');
+    return;
+  }
   unlockAudio();
   const name = playerName();
   room = code;
@@ -81,12 +89,17 @@ function joinRoom(code, wantSolo = false) {
   $('lobbychat').innerHTML = '';
   history.replaceState(null, '', wantSolo ? location.pathname : `?r=${code}`);
   net?.close();
-  net = new Net(code, {
+  // Einzelspieler/Hotseat läuft komplett im Browser (auch offline), Mehrspieler über den Server.
+  const Transport = wantSolo ? LocalNet : Net;
+  net = new Transport(code, {
     open() {
       $('conn').classList.add('hidden');
       net.send({ t: 'join', pid, name, solo: wantSolo, botLevel: prefLevel() });
     },
-    close() { $('conn').classList.remove('hidden'); },
+    close() {
+      $('conn').textContent = isOnline() ? 'Verbindung verloren – verbinde neu …' : '📴 Offline – Mehrspieler braucht Internet. Warte auf Verbindung …';
+      $('conn').classList.remove('hidden');
+    },
     message: onMessage,
   });
   $('roomcode').textContent = code;
@@ -129,8 +142,9 @@ $('copylink').onclick = async () => {
   try { await navigator.clipboard.writeText(url); $('copylink').textContent = 'Kopiert!'; } catch { prompt('Link:', url); }
   setTimeout(() => ($('copylink').textContent = 'Link kopieren'), 1500);
 };
-$('start').onclick = () => net?.send({ t: 'start' });
-$('rematch').onclick = () => net?.send({ t: 'start' });
+// Spielstart ist eine Nutzergeste: jetzt darf das Handy ins Vollbild + Querformat.
+$('start').onclick = () => { lockLandscape({ fullscreen: true }); net?.send({ t: 'start' }); };
+$('rematch').onclick = () => { lockLandscape({ fullscreen: true }); net?.send({ t: 'start' }); };
 // KI-Stärke: zuletzt gewählte Stufe merken (Einzelspieler & neue KI-Teams)
 const prefLevel = () => Math.max(1, Math.min(BOT_LEVELS.length - 1, +storage('wh.botlevel', 2) || 2));
 const levelOptions = (sel, withDummy = true) => BOT_LEVELS.filter((b) => withDummy || b.level > 0)
@@ -305,7 +319,11 @@ function renderLobby() {
   const inLobby = state.phase === 'lobby';
   $('menu').classList.toggle('hidden', !inLobby);
   $('hud').classList.toggle('hidden', inLobby);
+  const wasIngame = document.body.classList.contains('ingame');
   document.body.classList.toggle('ingame', !inLobby);
+  // Mitspieler, die nicht selbst gestartet haben: als App klappt das Sperren auch ohne Geste.
+  if (!inLobby && !wasIngame) lockLandscape();
+  else if (inLobby && wasIngame) unlockOrientation();
   $('gameover').classList.toggle('hidden', state.phase !== 'ended');
   if (inLobby) {
     renderTeams(isHost);

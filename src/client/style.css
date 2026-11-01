@@ -197,8 +197,15 @@ body.touch .touchonly { display: block; }
 body.touch .desktoponly { display: none; }
 body.touch { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; }
 body.touch input, body.touch select { -webkit-user-select: text; user-select: text; }
-#stage canvas { touch-action: none; }
+/* iOS: kein Doppeltipp-Zoom irgendwo auf der Seite. touch-action wird nicht vererbt,
+   wirkt aber nur, wenn alle Vorfahren mitmachen – daher für alle Elemente setzen.
+   Spielfläche, Steuerkreuz und Knöpfe darunter nehmen Gesten komplett selbst (none). */
+*, *::before, *::after { touch-action: manipulation; }
+html, body { overscroll-behavior: none; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+#stage, #stage canvas { touch-action: none; }
 button { touch-action: manipulation; }
+#offlinenote { color: #ffb74d; }
+body.offline #create, body.offline #join { opacity: 0.45; }
 #audioctl { right: max(10px, env(safe-area-inset-right)); bottom: max(10px, env(safe-area-inset-bottom)); }
 #topbar { padding-left: max(14px, env(safe-area-inset-left)); padding-right: max(14px, env(safe-area-inset-right)); padding-top: max(10px, env(safe-area-inset-top)); }
 
@@ -258,6 +265,7 @@ body.touch #audioctl button { padding: 4px 8px; font-size: 14px; }
 #rotate div { font-size: 64px; animation: tilt 1.6s ease-in-out infinite; }
 #rotate b { font-size: 20px; color: var(--hazard); }
 #rotate span { color: var(--muted); font-size: 14px; }
+#rotate .ioshint { font-size: 12px; max-width: 320px; }
 @keyframes tilt { 0%, 30% { transform: rotate(0); } 60%, 100% { transform: rotate(-90deg); } }
 @media (orientation: portrait) { body.touch.ingame #rotate { display: flex; } }
 
